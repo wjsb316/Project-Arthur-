@@ -8,7 +8,7 @@ Arthur Prime (AP) is a FastAPI-based backend service that provides a secure, str
 ┌─────────────────────────────────────┐
 │          EXTERNAL CLIENTS           │
 ├─────────────────────────────────────┤
-│          Local Web Host             │
+│    Local Web Host HTTPBasic Auth    │
 ├────────────────┬────────────────────┤
 │   📱 Device   │   🎤 Voice Input   │
 │  Mobile / IoT  │   [PLANNED]        │
@@ -50,7 +50,7 @@ Arthur Prime (AP) is a FastAPI-based backend service that provides a secure, str
          │                  │
          ▼                  ▼
 ┌───────────────────────────────────────────────┐
-│           PERSISTENCE (SQLite)                │
+│           PERSISTENCE (Postgres)                │
 ├────────────────┬────────────────┬─────────────┤
 │   🗄️ ops.db   │  🗄️ memory.db  │ ☁️ OpenAI   │
 │ permission_    │ memory_entries │   API       │
@@ -101,7 +101,7 @@ All endpoints validate incoming messages against the **Arthur Protocol v1.1** JS
 | Service | Location | Responsibility |
 |---------|----------|----------------|
 | **ModelProvider** | `ap/models/provider.py` | Interface for LLM providers; `OpenAIModelProvider` streams from GPT-5.2 |
-| **MemoryStore** | `ap/memory/store.py` | SQLite-backed memory with decay-weighted retrieval algorithm |
+| **MemoryStore** | `ap/memory/store.py` | database-backed memory with decay-weighted retrieval algorithm |
 | **Protocol Validator** | `ap/protocol/validator.py` | JSON Schema validation for all protocol messages |
 
 ### 5. Persistence Layer
@@ -146,8 +146,8 @@ All endpoints validate incoming messages against the **Arthur Protocol v1.1** JS
 
 ```
                     ┌─────────────────────┐
-                    │  🎤 Voice Input      │
-                    │   (New Module)       │
+                    │  🎤 Voice Input     │
+                    │   (New Module)      │
                     └──────────┬──────────┘
                                │
                     ┌──────────▼──────────┐
@@ -156,10 +156,10 @@ All endpoints validate incoming messages against the **Arthur Protocol v1.1** JS
                     └──────────┬──────────┘
                                │
                                ▼
-     ┌─────────────────────────────────────────────┐
-     │           Existing Pipeline                  │
-     │  /stream/v1/user-utterance (text: string)   │
-     └─────────────────────────────────────────────┘
+          ┌─────────────────────────────────────────────┐
+          │           Existing Pipeline                 │
+          │  /stream/v1/user-utterance (text: string)   │
+          └─────────────────────────────────────────────┘
 ```
 
 ### Recommended Integration Points
