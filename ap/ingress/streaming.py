@@ -34,11 +34,13 @@ class StreamManager:
         self._provider = provider
 
     def register(self, stream_id: str) -> asyncio.Event:
+        """Register a new stream and return its cancellation event."""
         event = asyncio.Event()
         self._cancellations[stream_id] = event
         return event
 
     async def cancel(self, stream_id: str) -> bool:
+        """Cancel an active stream by ID. Returns True if found."""
         event = self._cancellations.get(stream_id)
         if event:
             event.set()
@@ -47,11 +49,13 @@ class StreamManager:
         return False
 
     def cleanup(self, stream_id: str) -> None:
+        """Remove a stream from tracking."""
         self._cancellations.pop(stream_id, None)
 
 
 @dataclass
 class StreamState:
+    """Context for an active assistant response stream."""
     stream_id: str
     trace_id: str | None
     text: str
@@ -65,6 +69,13 @@ async def _assistant_stream(
     friend_brain: FriendBrain,
     audit_log: AuditLog,
 ) -> AsyncGenerator[str, None]:
+    """Orchestrates the streaming response generation.
+    
+    1. Streams raw tokens from the provider.
+    2. Wraps tokens in protocol messages (assistant_delta).
+    3. Accumulates text for final tone analysis.
+    4. Emits a final completion message (assistant_final).
+    """
     start_time = time.perf_counter()
     tokens: list[str] = []
     try:
@@ -206,11 +217,21 @@ def build_streaming_router(
     friend_brain: FriendBrain,
     audit_log: AuditLog,
 ) -> APIRouter:
+    """Build and configure the streaming ingress router."""
     router = APIRouter(prefix="/stream/v1")
     manager = StreamManager(provider)
 
     @router.post("/user-utterance")
     async def user_utterance(message: Dict[str, Any] = Body(...)) -> StreamingResponse:
+        """Handle incoming user speech/text and stream back assistant response.
+        
+        Process:
+        1. Validate schema and payload.
+        2. Check model provider health.
+        3. Retrieve relevant memory context.
+        4. Store user input in short-term memory.
+        5. Stream response via Server-Sent Events (SSE) logic over JSON-lines.
+        """
         try:
             validate_message(message)
         except ValidationError as exc:
@@ -261,6 +282,7 @@ def build_streaming_router(
 
     @router.post("/interrupt")
     async def interrupt(message: Dict[str, Any] = Body(...)) -> Dict[str, str]:
+        """Interrupt an active stream by ID."""
         try:
             validate_message(message)
         except ValidationError as exc:

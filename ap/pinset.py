@@ -18,13 +18,19 @@ def _validate_pin_format(pin: str) -> None:
 
 @dataclass
 class PinsetService:
-    """Provides SPKI pins for TLS certificate pinning."""
+    """Provides SPKI pins for TLS certificate pinning.
+    
+    Certificate pinning increases security by telling the client exactly which
+    public keys to trust, preventing man-in-the-middle attacks even if a
+    CA is compromised.
+    """
 
     pinset_id: str
     pins: Tuple[str, str] | None = None
     cert_path: Path | None = None
 
     def get_spki_pins(self) -> Tuple[str, str]:
+        """Return the primary and backup SPKI pins."""
         pin_pair = self.pins or self._derive_from_cert()
         if len(pin_pair) != 2:
             raise ValueError("Pinset must contain exactly two pins")
@@ -39,6 +45,7 @@ class PinsetService:
 
 
 def pinset_from_settings(settings: Settings) -> PinsetService:
+    """Factory to create a PinsetService from application settings."""
     pins: list[str] = []
     if settings.tls_spki_pin_primary:
         pins.append(settings.tls_spki_pin_primary)

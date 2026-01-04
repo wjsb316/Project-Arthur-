@@ -18,10 +18,21 @@ logger = logging.getLogger("arthur.ap.sessions")
 
 
 def build_sessions_router(pairing_repository: PairingRepository) -> APIRouter:
+    """Build the session management router.
+    
+    Endpoints:
+    - POST /client-hello: Exchange a bootstrap token for a session ID.
+    - POST /refresh: Extend the validity of an existing session.
+    """
     router = APIRouter(prefix="/session/v1")
 
     @router.post("/client-hello")
     async def client_hello(message: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Handle client handshake to establish a session.
+        
+        Requires a valid 'session_bootstrap_token' obtained during pairing.
+        Returns a 'server_hello' message with the session ID.
+        """
         try:
             validate_message(message)
         except ValidationError as exc:
@@ -94,6 +105,7 @@ def build_sessions_router(pairing_repository: PairingRepository) -> APIRouter:
 
     @router.post("/refresh")
     async def session_refresh(message: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Renew an active session to prevent expiration."""
         try:
             validate_message(message)
         except ValidationError as exc:

@@ -27,6 +27,21 @@ def create_app(
     friend_brain: FriendBrain | None = None,
     audit_log: AuditLog | None = None,
 ) -> FastAPI:
+    """Create and configure the FastAPI application.
+
+    This function initializes all core services (persistence, memory, brains, models)
+    and routes them into the application.
+
+    Args:
+        settings: Application settings. If None, loaded from environment/files.
+        model_provider: LLM provider instance. If None, defaults to OpenAI.
+        memory_store: Memory storage instance. If None, initialized from settings.
+        friend_brain: Tone/personality logic. If None, initialized with OpsGate.
+        audit_log: Audit logging service. If None, initialized from settings.
+
+    Returns:
+        FastAPI: The configured application instance.
+    """
     global app  # noqa: PLW0603
     settings = settings or load_settings()
     configure_logging(level=settings.log_level)
@@ -48,6 +63,7 @@ def create_app(
 
     @application.get("/health")
     async def health() -> dict[str, str]:
+        """Health check endpoint to verify service status."""
         return {"status": "ok"}
 
     application.include_router(

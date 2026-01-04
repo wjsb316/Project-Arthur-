@@ -101,8 +101,8 @@ async def test_streaming_creates_audit_entry(tmp_path):
 
     message = _user_utterance("trace-audit-stream")
     async with AsyncClient(app=app, base_url="http://test") as client:
-        response = await client.stream("POST", "/stream/v1/user-utterance", json=message)
-        await response.aread()
+        async with client.stream("POST", "/stream/v1/user-utterance", json=message) as response:
+            await response.aread()
 
     entries = list(audit_log.list_entries())
     assert any(entry.event == "assistant_stream_start" for entry in entries)

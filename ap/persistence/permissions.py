@@ -11,6 +11,7 @@ from typing import Optional
 
 @dataclass
 class PermissionRecord:
+    """Represents a stored permission request state."""
     request_id: str
     action: str
     client_label: str
@@ -21,7 +22,12 @@ class PermissionRecord:
 
 
 class PermissionRepository:
-    """Persists permission requests and delivered notes."""
+    """Persists permission requests and delivered notes.
+    
+    This repository tracks:
+    1. Permission Requests: User-initiated or system-initiated requests for action approval.
+    2. Delivered Notes: Records of notifications sent to the client.
+    """
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -69,6 +75,7 @@ class PermissionRepository:
         risk_tier: str,
         expires_at: datetime,
     ) -> None:
+        """Create a new permission request."""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -80,6 +87,7 @@ class PermissionRepository:
             conn.commit()
 
     def get_request(self, request_id: str) -> Optional[PermissionRecord]:
+        """Retrieve a permission request by ID."""
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -102,6 +110,7 @@ class PermissionRepository:
         )
 
     def set_status(self, request_id: str, status: str) -> None:
+        """Update the status of a permission request (e.g., 'approved', 'denied')."""
         with self._connect() as conn:
             conn.execute(
                 "UPDATE permission_requests SET status=? WHERE request_id=?",
@@ -110,6 +119,7 @@ class PermissionRepository:
             conn.commit()
 
     def is_approved(self, request_id: str) -> bool:
+        """Check if a specific request is currently approved and valid."""
         record = self.get_request(request_id)
         if record is None:
             return False
@@ -120,6 +130,7 @@ class PermissionRepository:
         return True
 
     def record_delivery(self, request_id: str, client_label: str, note: str) -> None:
+        """Record that a notification note was delivered to a client."""
         delivered_at = int(datetime.now(timezone.utc).timestamp())
         with self._connect() as conn:
             conn.execute(
@@ -132,9 +143,9 @@ class PermissionRepository:
             conn.commit()
 
     def was_delivered(self, request_id: str) -> bool:
+        """Check if a note for this request has already been delivered."""
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT 1 FROM delivered_notes WHERE request_id=? LIMIT 1", (request_id,)
             ).fetchone()
         return bool(row)
-

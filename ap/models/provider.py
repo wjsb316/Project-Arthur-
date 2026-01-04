@@ -17,22 +17,45 @@ logger = logging.getLogger("arthur.ap.model_provider")
 
 @dataclass
 class ProviderHealth:
-    status: str
+    """Health status of a model provider."""
+    status: str  # "ok", "degraded", "down"
     reason: str | None = None
     latency_ms: float | None = None
     metrics: dict[str, Any] | None = None
 
 
 class ModelProvider(Protocol):
+    """Interface for LLM providers supporting streaming responses."""
+    
     async def stream(
         self, stream_id: str, text: str, cancel_event: asyncio.Event
     ) -> AsyncGenerator[str, None]:
+        """Stream text tokens from the provider.
+        
+        Args:
+            stream_id: Unique identifier for this stream request.
+            text: Input text prompt.
+            cancel_event: Event to signal cancellation.
+            
+        Yields:
+            str: Text tokens as they are generated.
+        """
         ...
 
     async def cancel(self, stream_id: str) -> None:  # pragma: no cover - interface hook
+        """Cancel an active stream.
+        
+        Args:
+            stream_id: The ID of the stream to cancel.
+        """
         ...
 
     async def health_check(self) -> ProviderHealth:  # pragma: no cover - interface hook
+        """Check provider connectivity and health.
+        
+        Returns:
+            ProviderHealth: Current status.
+        """
         ...
 
 
@@ -56,6 +79,7 @@ class OpenAIModelProvider:
     async def stream(
         self, stream_id: str, text: str, cancel_event: asyncio.Event
     ) -> AsyncGenerator[str, None]:
+        """Stream completion tokens from OpenAI."""
         if not self._api_key:
             raise RuntimeError("model provider unavailable: missing api key")
 
@@ -75,23 +99,40 @@ class OpenAIModelProvider:
                 async for line in response.aiter_lines():
                     if cancel_event.is_set():
                         break
-                    if not line or not line.startswith("data:"):
+                    
+                    if not line:
                         continue
-                    data = line.removeprefix("data:").strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        parsed = json.loads(data)
-                        delta = parsed["choices"][0]["delta"].get("content", "")
-                    except Exception as exc:  # noqa: BLE001
-                        logger.error(
-                            "provider_stream_error",
-                            extra={"event": "provider_error", "provider": "openai", "stream_id": stream_id},
-                            exc_info=exc,
-                        )
-                        break
-                    if delta:
-                        yield delta
+                        
+                    # Handle concatenated SSE events
+                    parts = line.split("data: ")
+                    for part in parts:
+                        if cancel_event.is_set():
+                            break
+
+                        part = part.strip()
+                        if not part:
+                            continue
+                        
+                        if part == "[DONE]":
+                            break
+                        
+                        try:
+                            parsed = json.loads(part)
+                            delta = parsed["choices"][0]["delta"].get("content", "")
+                            if delta:
+                                yield delta
+                        except json.JSONDecodeError:
+                             logger.warning(
+                                "provider_stream_parse_warning",
+                                extra={"event": "provider_parse_warning", "provider": "openai", "stream_id": stream_id, "part": part},
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.error(
+                                "provider_stream_error",
+                                extra={"event": "provider_error", "provider": "openai", "stream_id": stream_id},
+                                exc_info=exc,
+                            )
+                            break
         except httpx.HTTPError as exc:
             logger.error(
                 "provider_http_error",
@@ -112,11 +153,13 @@ class OpenAIModelProvider:
             self._stream_events.pop(stream_id, None)
 
     async def cancel(self, stream_id: str) -> None:
+        """Signal cancellation for the given stream ID."""
         event = self._stream_events.get(stream_id)
         if event:
             event.set()
 
     async def health_check(self) -> ProviderHealth:
+        """Verify API key presence (connectivity check omitted for speed)."""
         if not self._api_key:
             return ProviderHealth(status="down", reason="missing_api_key")
         return ProviderHealth(status="ok")

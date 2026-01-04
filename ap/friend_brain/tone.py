@@ -9,11 +9,17 @@ from ..ops_brain import OpsBrainGate
 
 @dataclass
 class FriendBrain:
-    """Applies a consistent, empathetic tone while respecting OpsBrain decisions."""
+    """Applies a consistent, empathetic tone while respecting OpsBrain decisions.
+    
+    FriendBrain acts as the 'personality' layer. It takes raw text or intent
+    and wraps it in the assistant's persona (empathetic, reflective, solution-oriented).
+    It also consults the OpsBrainGate before approving actions that have side effects.
+    """
 
     ops_gate: OpsBrainGate | None = None
 
     def apply_tone(self, text: str) -> str:
+        """Transform raw text into the FriendBrain persona."""
         stripped = text.strip()
         if not stripped:
             stripped = "I'm here with you."

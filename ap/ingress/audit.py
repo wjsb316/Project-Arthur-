@@ -8,10 +8,15 @@ from ..persistence.audit import AuditLog
 
 
 def build_audit_router(audit_log: AuditLog) -> APIRouter:
+    """Build the audit data router.
+    
+    Provides endpoints for observability and debugging of the system log.
+    """
     router = APIRouter(prefix="/audit/v1")
 
     @router.get("/export")
     async def export() -> dict:
+        """Export all audit log entries."""
         entries = audit_log.list_entries()
         return {
             "entries": [

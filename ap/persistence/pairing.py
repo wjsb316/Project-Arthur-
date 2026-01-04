@@ -12,6 +12,7 @@ from typing import Iterable, Optional
 
 @dataclass
 class PairingRecord:
+    """Represents a pending pairing request."""
     pair_request_id: str
     pair_code: str
     device_id: str
@@ -21,6 +22,7 @@ class PairingRecord:
 
 @dataclass
 class DeviceRegistryRecord:
+    """Represents a paired device and its capabilities."""
     device_id: str
     client_label: str
     role: str
@@ -32,13 +34,20 @@ class DeviceRegistryRecord:
 
 @dataclass
 class SessionRecord:
+    """Represents an active authenticated session."""
     session_id: str
     device_id: str
     expires_at: datetime
 
 
 class PairingRepository:
-    """Stores pending pairing requests and device registry records."""
+    """Stores pending pairing requests and device registry records.
+    
+    Manages the lifecycle of device pairing:
+    1. Pending Pair: Initial request with a short-lived code.
+    2. Device Registry: Long-lived record of a paired device.
+    3. Session: Active authenticated session for a device.
+    """
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -107,6 +116,7 @@ class PairingRepository:
         device_id: str,
         expires_at: datetime,
     ) -> None:
+        """Create a new pending pairing request."""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -118,6 +128,7 @@ class PairingRepository:
             conn.commit()
 
     def list_pending(self) -> Iterable[PairingRecord]:
+        """List all currently pending pairing requests."""
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -140,9 +151,11 @@ class PairingRepository:
         )
 
     def approve(self, identifier: str) -> bool:
+        """Approve a pairing request by ID or code."""
         return self._update_status(identifier, "approved")
 
     def deny(self, identifier: str) -> bool:
+        """Deny a pairing request by ID or code."""
         return self._update_status(identifier, "denied")
 
     def _update_status(self, identifier: str, status: str) -> bool:
@@ -159,6 +172,7 @@ class PairingRepository:
             return cursor.rowcount > 0
 
     def get_by_request_id(self, pair_request_id: str) -> Optional[PairingRecord]:
+        """Retrieve a specific pairing request."""
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -180,6 +194,7 @@ class PairingRepository:
             )
 
     def get_device_by_bootstrap(self, token: str) -> Optional[DeviceRegistryRecord]:
+        """Find a device by its bootstrap token."""
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -205,6 +220,7 @@ class PairingRepository:
             )
 
     def update_device_seen(self, device_id: str, capabilities: list[str]) -> None:
+        """Update the last_seen timestamp and capabilities for a device."""
         timestamp = int(datetime.now(tz=timezone.utc).timestamp())
         with self._connect() as conn:
             conn.execute(
@@ -218,6 +234,7 @@ class PairingRepository:
             conn.commit()
 
     def create_session(self, session_id: str, device_id: str, expires_at: datetime) -> None:
+        """Create or update a session for a device."""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -229,6 +246,7 @@ class PairingRepository:
             conn.commit()
 
     def get_session(self, session_id: str) -> Optional[SessionRecord]:
+        """Retrieve session details by ID."""
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -248,6 +266,7 @@ class PairingRepository:
             )
 
     def refresh_session(self, session_id: str, expires_at: datetime) -> None:
+        """Extend the expiration time of a session."""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -267,6 +286,7 @@ class PairingRepository:
         session_id: str,
         session_bootstrap_token: str,
     ) -> None:
+        """Finalize pairing: update request status and create device registry entry."""
         timestamp = int(datetime.now(tz=timezone.utc).timestamp())
         with self._connect() as conn:
             conn.execute(

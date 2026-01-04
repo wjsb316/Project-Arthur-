@@ -10,15 +10,18 @@ from .persistence.pairing import PairingRecord, PairingRepository
 
 
 def list_pending(repository: PairingRepository) -> Iterable[PairingRecord]:
+    """Return all pending pairing requests."""
     return repository.list_pending()
 
 
 def approve_request(repository: PairingRepository, identifier: str) -> None:
+    """Approve a specific pairing request by ID or code."""
     if not repository.approve(identifier):
         raise ValueError("pairing request not found")
 
 
 def deny_request(repository: PairingRepository, identifier: str) -> None:
+    """Deny a specific pairing request by ID or code."""
     if not repository.deny(identifier):
         raise ValueError("pairing request not found")
 
@@ -44,6 +47,7 @@ def _load_repository() -> PairingRepository:
 
 
 def main() -> None:  # pragma: no cover - exercised via unit helpers
+    """CLI entry point."""
     parser = _build_parser()
     args = parser.parse_args()
     repo = _load_repository()
@@ -61,4 +65,3 @@ def main() -> None:  # pragma: no cover - exercised via unit helpers
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

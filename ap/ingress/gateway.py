@@ -19,6 +19,7 @@ from ..protocol.validator import validate_message
 
 
 def _iter_lines(message: str) -> Iterable[str]:
+    """Yield non-empty lines from a potentially multi-line string."""
     for line in message.splitlines():
         stripped = line.strip()
         if stripped:
@@ -26,6 +27,14 @@ def _iter_lines(message: str) -> Iterable[str]:
 
 
 def build_gateway_router() -> APIRouter:
+    """Build the WebSocket gateway router.
+    
+    The gateway handles:
+    1. Accepting WebSocket connections.
+    2. Receiving text frames (potentially containing multiple JSON-lines).
+    3. Parsing and validating each JSON message.
+    4. Enforcing protocol schema.
+    """
     router = APIRouter()
 
     @router.websocket("/ws/v1")
@@ -65,4 +74,3 @@ def build_gateway_router() -> APIRouter:
 
 
 __all__ = ["build_gateway_router"]
-

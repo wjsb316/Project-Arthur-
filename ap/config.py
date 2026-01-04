@@ -3,10 +3,31 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
-from pydantic import BaseSettings, ValidationError
+from pydantic import ValidationError
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    """Application configuration settings.
+
+    Attributes:
+        app_name: Name of the application (default: "Arthur Prime").
+        host: Host to bind the server to (default: "0.0.0.0").
+        port: Port to bind the server to (default: 8000).
+        log_level: Logging level (default: "INFO").
+        pairing_db_path: Path to the SQLite pairing database.
+        tls_cert_path: Path to the TLS certificate file.
+        tls_key_path: Path to the TLS key file.
+        tls_pinset_id: Identifier for the current pinset.
+        tls_spki_pin_primary: Primary SPKI pin for key pinning.
+        tls_spki_pin_backup: Backup SPKI pin for key pinning.
+        audit_db_path: Path to the SQLite audit database.
+        ops_db_path: Path to the SQLite operations database.
+        memory_db_path: Path to the SQLite memory database.
+        openai_api_key: API key for OpenAI (if using OpenAI provider).
+        openai_base_url: Base URL for OpenAI API (default: "https://api.openai.com/v1").
+        openai_model: OpenAI model to use (default: "gpt-5.2").
+    """
     app_name: str = "Arthur Prime"
     host: str = "0.0.0.0"
     port: int = 8000
@@ -36,6 +57,23 @@ def _load_config_file(path: Path) -> Dict[str, Any]:
 
 
 def load_settings(config_path: str | None = None) -> Settings:
+    """Load settings from environment variables and optional configuration files.
+
+    Order of precedence:
+    1. Environment variables (ARTHUR_*)
+    2. Explicit config file path argument
+    3. ARTHUR_CONFIG_FILE environment variable
+    4. Defaults
+
+    Args:
+        config_path: Optional path to a JSON configuration file.
+
+    Returns:
+        Settings: Loaded configuration object.
+
+    Raises:
+        ValueError: If configuration validation fails.
+    """
     explicit_path = Path(config_path) if config_path else None
     env_path = Path(os.environ["ARTHUR_CONFIG_FILE"]) if "ARTHUR_CONFIG_FILE" in os.environ else None
 

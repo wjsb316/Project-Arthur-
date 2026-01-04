@@ -17,6 +17,7 @@ from ..pinset import PinsetService
 
 
 class PairStartRequest(BaseModel):
+    """Request model for starting the pairing process."""
     device_id: str = Field(..., min_length=1)
 
     class Config:
@@ -24,6 +25,7 @@ class PairStartRequest(BaseModel):
 
 
 class PairStartResponse(BaseModel):
+    """Response model containing pairing code and security pins."""
     pair_request_id: str
     pair_code: str
     expires_in_sec: int
@@ -32,6 +34,7 @@ class PairStartResponse(BaseModel):
 
 
 class PairCompleteRequest(BaseModel):
+    """Request model for finalizing pairing after user approval."""
     pair_request_id: str = Field(..., min_length=1)
     pair_code: str = Field(..., min_length=6, max_length=10)
     client_label: str = Field(..., min_length=1)
@@ -43,12 +46,14 @@ class PairCompleteRequest(BaseModel):
 
 
 class DeviceRecord(BaseModel):
+    """Device details returned on successful pairing."""
     device_id: str
     client_label: str
     role: str
 
 
 class PairCompleteResponse(BaseModel):
+    """Response containing the bootstrap token for the session."""
     session_bootstrap_token: str
     session_id: str
     device_record: DeviceRecord
@@ -65,10 +70,18 @@ def build_pairing_router(
     pinset_service: PinsetService,
     pairing_repository: PairingRepository,
 ) -> APIRouter:
+    """Build the pairing API router.
+    
+    Flow:
+    1. POST /start: Client initiates pairing, receives a short code.
+    2. (Out of Band): User approves pairing via CLI/UI using the code.
+    3. POST /complete: Client polls or calls complete to get the session token.
+    """
     router = APIRouter(prefix="/pair/v1")
 
     @router.post("/start")
     async def start_pairing(request: PairStartRequest) -> PairStartResponse:
+        """Initiate pairing. Returns a pair_code for the user to verify."""
         try:
             pins = pinset_service.get_spki_pins()
         except ValueError as exc:  # pragma: no cover - defensive
@@ -99,6 +112,7 @@ def build_pairing_router(
 
     @router.post("/complete")
     async def complete_pairing(request: PairCompleteRequest) -> PairCompleteResponse:
+        """Complete pairing. Requires the request to be 'approved' in persistence."""
         record = await anyio.to_thread.run_sync(
             pairing_repository.get_by_request_id, request.pair_request_id
         )
@@ -152,4 +166,3 @@ def build_pairing_router(
         )
 
     return router
-

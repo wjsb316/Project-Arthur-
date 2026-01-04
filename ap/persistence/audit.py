@@ -12,6 +12,7 @@ from typing import Iterable
 
 @dataclass(frozen=True)
 class AuditEntry:
+    """Immutable record of a single audit event."""
     id: int
     event: str
     severity: str
@@ -21,7 +22,11 @@ class AuditEntry:
 
 
 class AuditLog:
-    """Append-only audit log backed by SQLite."""
+    """Append-only audit log backed by SQLite.
+    
+    This log tracks system events for observability, security, and debugging.
+    It is designed to be immutable (no update/delete methods exposed).
+    """
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -56,6 +61,7 @@ class AuditLog:
         trace_id: str | None = None,
         details: dict | None = None,
     ) -> int:
+        """Record a new event in the audit log."""
         payload = json.dumps(details) if details is not None else None
         timestamp = int(datetime.now(timezone.utc).timestamp())
         with self._connect() as conn:
@@ -70,6 +76,7 @@ class AuditLog:
             return int(cursor.lastrowid)
 
     def list_entries(self, limit: int = 200) -> Iterable[AuditEntry]:
+        """Retrieve recent audit entries."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -93,4 +100,3 @@ class AuditLog:
             details=details,
             created_at=created_at,
         )
-

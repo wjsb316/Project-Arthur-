@@ -24,10 +24,21 @@ def _risk_tier_for_action(action: str) -> str:
 
 
 def build_ops_router(permission_repository: PermissionRepository) -> APIRouter:
+    """Build router for permission requests and responses.
+    
+    This router handles:
+    1. /side-effect: Creating a request for a high-risk action (send_note).
+    2. /permission-response: Handling the user's approval/denial of that request.
+    """
     router = APIRouter(prefix="/ops/v1")
 
     @router.post("/side-effect")
     async def request_side_effect(message: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Request permission to perform a side-effect (e.g. send a note).
+        
+        The flow creates a pending request in the DB and returns it to the client,
+        which should then prompt the user for confirmation.
+        """
         try:
             validate_message(message)
         except ValidationError as exc:
@@ -98,6 +109,7 @@ def build_ops_router(permission_repository: PermissionRepository) -> APIRouter:
 
     @router.post("/permission-response")
     async def permission_response(message: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Handle user decision (approve/deny) for a permission request."""
         try:
             validate_message(message)
         except ValidationError as exc:

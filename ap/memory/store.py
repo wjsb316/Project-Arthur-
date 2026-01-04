@@ -12,8 +12,9 @@ from typing import Iterable, List
 
 @dataclass
 class MemoryEntry:
+    """Represents a single retrieved memory item."""
     id: int
-    kind: str
+    kind: str  # "fact", "episode", "open_loop"
     content: str
     importance: float
     decay_rate: float
@@ -22,7 +23,13 @@ class MemoryEntry:
 
 
 class MemoryStore:
-    """Persists structured memory entries with decay-aware retrieval."""
+    """Persists structured memory entries with decay-aware retrieval.
+    
+    This store implements a retrieval algorithm that balances:
+    - Importance: How critical the memory is (weighted base score).
+    - Recency: How recently it was accessed.
+    - Decay: How fast it fades over time (exponential decay).
+    """
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -72,21 +79,29 @@ class MemoryStore:
             return int(cursor.lastrowid)
 
     def store_fact(self, content: str, *, importance: float = 1.0, decay_rate: float = 0.01) -> int:
+        """Store a factual memory (low decay)."""
         return self._store("fact", content, importance=importance, decay_rate=decay_rate)
 
     def store_episode(self, content: str, *, importance: float = 1.0, decay_rate: float = 0.01) -> int:
+        """Store an episodic memory (events)."""
         return self._store("episode", content, importance=importance, decay_rate=decay_rate)
 
     def store_open_loop(self, content: str, *, importance: float = 0.5, decay_rate: float = 0.02) -> int:
+        """Store a short-term 'open loop' memory (higher decay)."""
         return self._store("open_loop", content, importance=importance, decay_rate=decay_rate)
 
     def forget(self, entry_id: int) -> bool:
+        """Permanently remove a memory entry."""
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM memory_entries WHERE id = ?", (entry_id,))
             conn.commit()
             return cursor.rowcount > 0
 
     def retrieve_relevant(self, query: str, *, limit: int = 5) -> List[MemoryEntry]:
+        """Retrieve memories relevant to the query string.
+        
+        Relevance score = (importance + token_overlap) * recency_weight * decay_factor
+        """
         now = int(time.time())
         tokens = set(query.lower().split())
         with self._connect() as conn:
@@ -137,4 +152,3 @@ class MemoryStore:
                 [(now, entry_id) for entry_id in ids],
             )
             conn.commit()
-
