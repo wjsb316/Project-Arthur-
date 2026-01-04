@@ -1,0 +1,13 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+.env
+.pytest_cache*
+.vscode*
+.DS_Store
+.idea*
+.cursor*
+.cursorrules*
+.cursorignore*
+.cursorignore*
