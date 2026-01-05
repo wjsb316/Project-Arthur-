@@ -18,8 +18,6 @@ Arthur Prime (AP) is a FastAPI-based backend service that provides a secure, str
         ▼                  ▼           
 ┌───────────────────────────────────────────────────┐
 │            INGRESS LAYER (FastAPI)                │
-├───────────────────────────────────────────────────┤
-│            HTTP Basic Auth                        │
 ├────────────┬────────────┬────────────┬────────────┤
 │ WS Gateway │  Sessions  │ Streaming  │    Ops     │
 │  /ws/v1    │/session/v1 │ /stream/v1 │  /ops/v1   │
@@ -49,14 +47,14 @@ Arthur Prime (AP) is a FastAPI-based backend service that provides a secure, str
 └────────┬─────────┴────────┬─────────┴──────────────────┘
          │                  │
          ▼                  ▼
-┌───────────────────────────────────────────────┐
-│           PERSISTENCE (Postgres)                │
-├────────────────┬────────────────┬─────────────┤
-│   🗄️ ops.db   │  🗄️ memory.db  │ ☁️ OpenAI   │
-│ permission_    │ memory_entries │   API       │
-│   requests     │ (fact/episode/ │  External   │
-│ delivered_notes│  open_loop)    │             │
-└────────────────┴────────────────┴─────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                     PERSISTENCE (SQLite)                   │
+├────────────────┬────────────────┬─────────── ┬─────────────┤
+│   🗄️ ops.db   │  🗄️ memory.db  │🗄️ audit.db │ ☁️ OpenAI  │
+│ permission_    │ memory_entries │ audit_log  │   API       │
+│   requests     │ (fact/episode/ │ (append-   │  External   │
+│ delivered_notes│  open_loop)    │  only)     │             │
+└────────────────┴────────────────┴─────────── ┴─────────────┘
 ```
 
 ---
