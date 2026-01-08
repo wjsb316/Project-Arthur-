@@ -3,6 +3,9 @@ FROM pytorch/pytorch:2.9.1-cuda13.0-cudnn9-runtime
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
+    nano \
+    ffmpeg \
+    espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
