@@ -1,0 +1,14 @@
+Docker
+    WSL backend 24.04
+    pytorch/pytorch:2.9.1-cuda13.0-cudnn9-runtime
+    Select 24.04 in Docker>Settings>Resources>WSL integration
+Nvidia GPU Drivers inside WSL - should already be installed - check with nvidia-smi
+Nvidia container toolkit inside 24.04 WSL
+    https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#with-apt-ubuntu-debian
+WSL (local dev env)
+    user: arthur
+    pass: assistant
+Run container in WSL
+    docker volume create AP-engine
+    docker run --rm -v AP-engine:/app alpine/git clone https://github.com/wjsb316/Project-Arthur-.git /app
+    docker run --gpus all -it --rm pytorch/pytorch:2.9.1-cuda13.0-cudnn9-runtime
