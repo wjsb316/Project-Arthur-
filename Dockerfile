@@ -26,7 +26,6 @@ FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
 RUN apt-get update && apt-get install -y \
     git \
     nano \
-    ffmpeg \
     espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
