@@ -1,6 +1,6 @@
 # Stage 1: Builder (with CUDA compiler)
 # We use the 'devel' tag which includes nvcc (needed to compile llama-cpp-python with GPU support)
-FROM pytorch/pytorch:2.9.1-cuda13.0-cudnn9-devel AS builder
+FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-devel AS builder
 
 WORKDIR /build
 
@@ -20,7 +20,7 @@ RUN CMAKE_ARGS="-DGGML_CUDA=on" pip wheel --no-cache-dir --wheel-dir /build/whee
 
 
 # Stage 2: Runtime (Slim final image)
-FROM pytorch/pytorch:2.9.1-cuda13.0-cudnn9-runtime
+FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
 
 # Install runtime system dependencies
 RUN apt-get update && apt-get install -y \
