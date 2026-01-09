@@ -39,7 +39,9 @@ COPY --from=builder /build/wheels /wheels
 COPY requirements.txt .
 
 # Install dependencies
-# We tell pip to look in /wheels first. This ensures our GPU-enabled llama-cpp-python is used.
-RUN pip install --no-cache-dir --find-links=/wheels -r requirements.txt
+# 1. Install llama-cpp-python specifically from our built wheels (force no PyPI lookup for this package)
+# 2. Install the rest from requirements.txt
+RUN pip install --no-cache-dir --no-index --find-links=/wheels llama-cpp-python==0.3.16 && \
+    pip install --no-cache-dir -r requirements.txt
 
 # The code will be mounted at runtime via the volume
