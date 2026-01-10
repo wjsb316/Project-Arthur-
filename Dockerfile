@@ -41,6 +41,7 @@ COPY requirements.txt .
 # Install dependencies
 # 1. Install llama-cpp-python specifically from our built wheels (force no PyPI lookup for this package)
 # 2. Install the rest from requirements.txt
+# RUN pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 && \
 RUN pip install --no-cache-dir --no-index --find-links=/wheels llama-cpp-python==0.3.16 && \
     pip install --no-cache-dir -r requirements.txt
 
