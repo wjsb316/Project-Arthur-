@@ -8,17 +8,19 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, Annotated
 
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
 from jsonschema import ValidationError
 
 from ..protocol.validator import validate_message
 from ..models import ModelProvider, ProviderHealth
 from ..memory import MemoryStore, MemoryEntry
-from ..friend_brain import FriendBrain
+from ..personal_brain import PersonalBrain
 from ..persistence.audit import AuditLog
+from ..models.users import User as UserRecord
+from .auth import get_current_user
 
 MAX_UTTERANCE_LENGTH = 2048
 STREAM_DELAY_SECONDS = 0.01
@@ -66,7 +68,7 @@ async def _assistant_stream(
     cancel_event: asyncio.Event,
     manager: StreamManager,
     provider: ModelProvider,
-    friend_brain: FriendBrain,
+    personal_brain: PersonalBrain,
     audit_log: AuditLog,
 ) -> AsyncGenerator[str, None]:
     """Orchestrates the streaming response generation.
@@ -108,7 +110,7 @@ async def _assistant_stream(
             return
 
         final_text = "".join(tokens) if tokens else state.text
-        toned_text = friend_brain.apply_tone(final_text)
+        toned_text = personal_brain.apply_tone(final_text)
         confidence, model_health = await _build_confidence_and_health(provider)
         final = {
             "id": state.stream_id,
@@ -214,7 +216,7 @@ async def _build_confidence_and_health(provider: ModelProvider) -> tuple[dict[st
 def build_streaming_router(
     provider: ModelProvider,
     memory_store: MemoryStore,
-    friend_brain: FriendBrain,
+    personal_brain: PersonalBrain,
     audit_log: AuditLog,
 ) -> APIRouter:
     """Build and configure the streaming ingress router."""
@@ -222,14 +224,17 @@ def build_streaming_router(
     manager = StreamManager(provider)
 
     @router.post("/user-utterance")
-    async def user_utterance(message: Dict[str, Any] = Body(...)) -> StreamingResponse:
+    async def user_utterance(
+        message: Dict[str, Any] = Body(...),
+        current_user: UserRecord = Depends(get_current_user),
+    ) -> StreamingResponse:
         """Handle incoming user speech/text and stream back assistant response.
         
         Process:
         1. Validate schema and payload.
         2. Check model provider health.
-        3. Retrieve relevant memory context.
-        4. Store user input in short-term memory.
+        3. Retrieve relevant memory context (scoped to user).
+        4. Store user input in short-term memory (scoped to user).
         5. Stream response via Server-Sent Events (SSE) logic over JSON-lines.
         """
         try:
@@ -263,25 +268,30 @@ def build_streaming_router(
 
         _ensure_provider_ready(await provider.health_check(), audit_log, trace_id)
 
-        retrieved = memory_store.retrieve_relevant(text, limit=5)
+        # Multi-tenancy: Pass user_id to memory store
+        retrieved = memory_store.retrieve_relevant(text, current_user.user_id, limit=5)
         context = _compact_context(retrieved)
         prompt_text = f"{context}User: {text}" if context else text
-        memory_store.store_open_loop(text)
+        
+        await memory_store.store_open_loop(text, current_user.user_id)
 
         audit_log.append(
             "assistant_stream_start",
             severity="info",
             trace_id=trace_id,
-            details={"stream_id": message["id"]},
+            details={"stream_id": message["id"], "user_id": current_user.user_id},
         )
 
         state = StreamState(stream_id=message["id"], trace_id=trace_id, text=prompt_text)
         cancel_event = manager.register(state.stream_id)
-        generator = _assistant_stream(state, cancel_event, manager, provider, friend_brain, audit_log)
+        generator = _assistant_stream(state, cancel_event, manager, provider, personal_brain, audit_log)
         return StreamingResponse(generator, media_type="application/json")
 
     @router.post("/interrupt")
-    async def interrupt(message: Dict[str, Any] = Body(...)) -> Dict[str, str]:
+    async def interrupt(
+        message: Dict[str, Any] = Body(...),
+        current_user: UserRecord = Depends(get_current_user),
+    ) -> Dict[str, str]:
         """Interrupt an active stream by ID."""
         try:
             validate_message(message)
@@ -323,7 +333,7 @@ def build_streaming_router(
             "assistant_stream_interrupt",
             severity="info",
             trace_id=trace_id,
-            details={"stream_id": stream_id},
+            details={"stream_id": stream_id, "user_id": current_user.user_id},
         )
 
         return {"status": "cancelled", "id": stream_id}

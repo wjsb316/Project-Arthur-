@@ -3,57 +3,26 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, List
 
+from sqlalchemy import select, desc
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-@dataclass(frozen=True)
-class AuditEntry:
-    """Immutable record of a single audit event."""
-    id: int
-    event: str
-    severity: str
-    trace_id: str | None
-    details: dict | None
-    created_at: datetime
+from ..models.audit import AuditLogEntry
 
 
 class AuditLog:
-    """Append-only audit log backed by SQLite.
+    """Append-only audit log backed by SQLAlchemy.
     
     This log tracks system events for observability, security, and debugging.
-    It is designed to be immutable (no update/delete methods exposed).
     """
 
-    def __init__(self, db_path: Path) -> None:
-        self._db_path = db_path
-        self._ensure_tables()
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _ensure_tables(self) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event TEXT NOT NULL,
-                    severity TEXT NOT NULL,
-                    trace_id TEXT,
-                    details TEXT,
-                    created_at INTEGER NOT NULL
-                );
-                """
-            )
-            conn.commit()
-
-    def append(
+    async def append(
         self,
         event: str,
         *,
@@ -62,41 +31,22 @@ class AuditLog:
         details: dict | None = None,
     ) -> int:
         """Record a new event in the audit log."""
-        payload = json.dumps(details) if details is not None else None
-        timestamp = int(datetime.now(timezone.utc).timestamp())
-        with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO audit_log (event, severity, trace_id, details, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (event, severity, trace_id, payload, timestamp),
+        now = datetime.now(timezone.utc)
+        async with self._session_factory() as session:
+            entry = AuditLogEntry(
+                event=event,
+                severity=severity,
+                trace_id=trace_id,
+                details=details, # Model property setter handles JSON conversion
+                created_at=now
             )
-            conn.commit()
-            return int(cursor.lastrowid)
+            session.add(entry)
+            await session.commit()
+            return entry.id
 
-    def list_entries(self, limit: int = 200) -> Iterable[AuditEntry]:
+    async def list_entries(self, limit: int = 200) -> List[AuditLogEntry]:
         """Retrieve recent audit entries."""
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, event, severity, trace_id, details, created_at
-                FROM audit_log
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [self._row_to_entry(row) for row in rows]
-
-    def _row_to_entry(self, row: sqlite3.Row) -> AuditEntry:
-        details = json.loads(row[4]) if row[4] else None
-        created_at = datetime.fromtimestamp(row[5], tz=timezone.utc)
-        return AuditEntry(
-            id=row[0],
-            event=row[1],
-            severity=row[2],
-            trace_id=row[3],
-            details=details,
-            created_at=created_at,
-        )
+        async with self._session_factory() as session:
+            stmt = select(AuditLogEntry).order_by(desc(AuditLogEntry.id)).limit(limit)
+            result = await session.execute(stmt)
+            return result.scalars().all()

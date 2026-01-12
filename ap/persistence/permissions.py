@@ -1,72 +1,23 @@
-"""SQLite persistence for permission requests and note delivery."""
+"""SQLAlchemy persistence for permission requests and note delivery."""
 
 from __future__ import annotations
 
-import sqlite3
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-@dataclass
-class PermissionRecord:
-    """Represents a stored permission request state."""
-    request_id: str
-    action: str
-    client_label: str
-    note: str
-    risk_tier: str
-    expires_at: datetime
-    status: str
+from ..models.ops import PermissionRequest, DeliveredNote
 
 
 class PermissionRepository:
-    """Persists permission requests and delivered notes.
-    
-    This repository tracks:
-    1. Permission Requests: User-initiated or system-initiated requests for action approval.
-    2. Delivered Notes: Records of notifications sent to the client.
-    """
+    """Persists permission requests and delivered notes using SQLAlchemy."""
 
-    def __init__(self, db_path: Path) -> None:
-        self._db_path = db_path
-        self._ensure_tables()
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _ensure_tables(self) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS permission_requests (
-                    request_id TEXT PRIMARY KEY,
-                    action TEXT NOT NULL,
-                    client_label TEXT NOT NULL,
-                    note TEXT NOT NULL,
-                    risk_tier TEXT NOT NULL,
-                    expires_at INTEGER NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'pending'
-                );
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS delivered_notes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    request_id TEXT NOT NULL,
-                    client_label TEXT NOT NULL,
-                    note TEXT NOT NULL,
-                    delivered_at INTEGER NOT NULL
-                );
-                """
-            )
-            conn.commit()
-
-    def create_request(
+    async def create_request(
         self,
         request_id: str,
         action: str,
@@ -76,51 +27,40 @@ class PermissionRepository:
         expires_at: datetime,
     ) -> None:
         """Create a new permission request."""
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO permission_requests (request_id, action, client_label, note, risk_tier, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (request_id, action, client_label, note, risk_tier, int(expires_at.timestamp())),
+        async with self._session_factory() as session:
+            req = PermissionRequest(
+                request_id=request_id,
+                action=action,
+                client_label=client_label,
+                note=note,
+                risk_tier=risk_tier,
+                expires_at=expires_at,
+                status="pending"
             )
-            conn.commit()
+            session.add(req)
+            await session.commit()
 
-    def get_request(self, request_id: str) -> Optional[PermissionRecord]:
+    async def get_request(self, request_id: str) -> Optional[PermissionRequest]:
         """Retrieve a permission request by ID."""
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT request_id, action, client_label, note, risk_tier, expires_at, status
-                FROM permission_requests
-                WHERE request_id = ?
-                """,
-                (request_id,),
-            ).fetchone()
-        if not row:
-            return None
-        return PermissionRecord(
-            request_id=row[0],
-            action=row[1],
-            client_label=row[2],
-            note=row[3],
-            risk_tier=row[4],
-            expires_at=datetime.fromtimestamp(row[5], tz=timezone.utc),
-            status=row[6],
-        )
+        async with self._session_factory() as session:
+            stmt = select(PermissionRequest).where(PermissionRequest.request_id == request_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
 
-    def set_status(self, request_id: str, status: str) -> None:
+    async def set_status(self, request_id: str, status: str) -> None:
         """Update the status of a permission request (e.g., 'approved', 'denied')."""
-        with self._connect() as conn:
-            conn.execute(
-                "UPDATE permission_requests SET status=? WHERE request_id=?",
-                (status, request_id),
-            )
-            conn.commit()
+        async with self._session_factory() as session:
+            stmt = select(PermissionRequest).where(PermissionRequest.request_id == request_id)
+            result = await session.execute(stmt)
+            record = result.scalar_one_or_none()
+            
+            if record:
+                record.status = status
+                await session.commit()
 
-    def is_approved(self, request_id: str) -> bool:
+    async def is_approved(self, request_id: str) -> bool:
         """Check if a specific request is currently approved and valid."""
-        record = self.get_request(request_id)
+        record = await self.get_request(request_id)
         if record is None:
             return False
         if record.status != "approved":
@@ -129,23 +69,22 @@ class PermissionRepository:
             return False
         return True
 
-    def record_delivery(self, request_id: str, client_label: str, note: str) -> None:
+    async def record_delivery(self, request_id: str, client_label: str, note: str) -> None:
         """Record that a notification note was delivered to a client."""
-        delivered_at = int(datetime.now(timezone.utc).timestamp())
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO delivered_notes (request_id, client_label, note, delivered_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (request_id, client_label, note, delivered_at),
+        delivered_at = datetime.now(timezone.utc)
+        async with self._session_factory() as session:
+            delivery = DeliveredNote(
+                request_id=request_id,
+                client_label=client_label,
+                note=note,
+                delivered_at=delivered_at
             )
-            conn.commit()
+            session.add(delivery)
+            await session.commit()
 
-    def was_delivered(self, request_id: str) -> bool:
+    async def was_delivered(self, request_id: str) -> bool:
         """Check if a note for this request has already been delivered."""
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM delivered_notes WHERE request_id=? LIMIT 1", (request_id,)
-            ).fetchone()
-        return bool(row)
+        async with self._session_factory() as session:
+            stmt = select(DeliveredNote).where(DeliveredNote.request_id == request_id).limit(1)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none() is not None
