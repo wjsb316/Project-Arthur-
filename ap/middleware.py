@@ -20,6 +20,10 @@ class FrontendAccessMiddleware(BaseHTTPMiddleware):
             or path.endswith(".css")
             or path.endswith(".png")
             or path.endswith(".ico")
+            or path.endswith(".svg")
+            or path.endswith(".json")
+            or path.endswith(".woff")
+            or path.endswith(".woff2")
             or path == "/health" # Keep health check accessible
         ):
             return await call_next(request)

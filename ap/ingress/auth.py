@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,6 +19,8 @@ from ..security import (
     get_password_hash,
     verify_password,
 )
+
+logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -96,34 +99,43 @@ def build_auth_router() -> APIRouter:
         user: UserCreate,
         session: Annotated[AsyncSession, Depends(get_db)],
     ):
-        stmt = select(User).where(User.username == user.username)
-        result = await session.execute(stmt)
-        existing_user = result.scalar_one_or_none()
-        
-        if existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username already registered",
+        try:
+            stmt = select(User).where(User.username == user.username)
+            result = await session.execute(stmt)
+            existing_user = result.scalar_one_or_none()
+            
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Username already registered",
+                )
+            
+            import uuid
+            user_id = user.user_id or str(uuid.uuid4())
+            hashed_password = get_password_hash(user.password)
+            
+            new_user = User(
+                user_id=user_id,
+                username=user.username,
+                password_hash=hashed_password
             )
-        
-        import uuid
-        user_id = user.user_id or str(uuid.uuid4())
-        hashed_password = get_password_hash(user.password)
-        
-        new_user = User(
-            user_id=user_id,
-            username=user.username,
-            password_hash=hashed_password
-        )
-        session.add(new_user)
-        await session.commit()
-        await session.refresh(new_user)
-        
-        return UserResponse(
-            user_id=new_user.user_id,
-            username=new_user.username,
-            created_at=str(new_user.created_at)
-        )
+            session.add(new_user)
+            await session.commit()
+            await session.refresh(new_user)
+            
+            return UserResponse(
+                user_id=new_user.user_id,
+                username=new_user.username,
+                created_at=str(new_user.created_at)
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Registration failed: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Registration failed: {str(e)}"
+            )
 
     @router.delete("/users/me")
     async def delete_me(
