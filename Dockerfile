@@ -1,5 +1,5 @@
 # Stage 0: Frontend Builder
-FROM node:18-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 WORKDIR /frontend
 COPY frontend/package*.json ./
 RUN npm install
@@ -60,8 +60,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --no-index --find-links=/wheels llama-cpp-python==0.3.16 && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy frontend build
-COPY --from=frontend-builder /frontend/dist /app/static
+# Copy frontend build to a system location preserved during volume mounts
+COPY --from=frontend-builder /frontend/dist /usr/share/app/static
 
 # Copy app code
 COPY . .

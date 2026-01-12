@@ -88,16 +88,23 @@ def create_app(
     application.include_router(build_audit_router(audit))
 
     # Static Files & SPA Handling
-    # In Docker, we'll copy frontend/dist to /app/static
-    # In Dev, we might want to point to ../frontend/dist if it exists
-    static_dir = Path("static")
-    if not static_dir.exists():
-        static_dir = Path("frontend/dist")
-        if not static_dir.exists():
-            # Fallback for when running from root
-            static_dir = Path("Project-Arthur-/frontend/dist")
+    # Search order:
+    # 1. 'static' in current dir (legacy/manual override)
+    # 2. 'frontend/dist' in current dir (local dev with built frontend)
+    # 3. '/usr/share/app/static' (container fallback when /app is mounted)
+    possible_static_dirs = [
+        Path("static"),
+        Path("frontend/dist"),
+        Path("/usr/share/app/static"),
+    ]
 
-    if static_dir.exists():
+    static_dir = None
+    for path in possible_static_dirs:
+        if path.exists():
+            static_dir = path
+            break
+
+    if static_dir and static_dir.exists():
         # Mount assets folder
         if (static_dir / "assets").exists():
             application.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
