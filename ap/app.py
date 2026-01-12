@@ -1,86 +1,120 @@
+from pathlib import Path
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 
 from .config import Settings, load_settings
+from .database import get_session_maker, init_db
 from .ingress.gateway import build_gateway_router
-from .ingress.pairing import build_pairing_router
 from .ingress.streaming import build_streaming_router
-from .ingress.ops import build_ops_router
-from .ingress.sessions import build_sessions_router
+from .ingress.professional import build_professional_router
+from .ingress.auth import build_auth_router
 from .logging_config import configure_logging
 from .memory import MemoryStore
-from .persistence.pairing import PairingRepository
 from .persistence.permissions import PermissionRepository
 from .persistence.audit import AuditLog
-from .pinset import pinset_from_settings
 from .models import ModelProvider, OpenAIModelProvider
-from .friend_brain import FriendBrain
-from .ops_brain import OpsBrainGate
+from .personal_brain import PersonalBrain
+from .professional_brain import ProfessionalBrainGate
+from .middleware import FrontendAccessMiddleware
 
 
 app: FastAPI | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize DB
+    await init_db()
+    yield
+    # Shutdown: Clean up (if needed)
 
 
 def create_app(
     settings: Settings | None = None,
     model_provider: ModelProvider | None = None,
     memory_store: MemoryStore | None = None,
-    friend_brain: FriendBrain | None = None,
+    personal_brain: PersonalBrain | None = None,
     audit_log: AuditLog | None = None,
 ) -> FastAPI:
-    """Create and configure the FastAPI application.
-
-    This function initializes all core services (persistence, memory, brains, models)
-    and routes them into the application.
-
-    Args:
-        settings: Application settings. If None, loaded from environment/files.
-        model_provider: LLM provider instance. If None, defaults to OpenAI.
-        memory_store: Memory storage instance. If None, initialized from settings.
-        friend_brain: Tone/personality logic. If None, initialized with OpsGate.
-        audit_log: Audit logging service. If None, initialized from settings.
-
-    Returns:
-        FastAPI: The configured application instance.
-    """
+    """Create and configure the FastAPI application."""
     global app  # noqa: PLW0603
     settings = settings or load_settings()
     configure_logging(level=settings.log_level)
 
-    pinset_service = pinset_from_settings(settings)
-    pairing_repository = PairingRepository(settings.pairing_db_path)
-    permission_repository = PermissionRepository(settings.ops_db_path)
-    audit = audit_log or AuditLog(settings.audit_db_path)
+    # Initialize ORM session maker
+    session_maker = get_session_maker()
+
+    # Initialize repositories with session factory instead of paths
+    permission_repository = PermissionRepository(session_maker)
+    audit = audit_log or AuditLog(session_maker)
+    
     provider = model_provider or OpenAIModelProvider(
         settings.openai_api_key,
         base_url=settings.openai_base_url,
         model=settings.openai_model,
     )
-    memory = memory_store or MemoryStore(settings.memory_db_path)
-    ops_gate = OpsBrainGate(permission_repository)
-    friend = friend_brain or FriendBrain(ops_gate=ops_gate)
+    
+    # Use the ORM-based MemoryStore
+    memory = memory_store or MemoryStore(session_maker)
+    
+    professional_gate = ProfessionalBrainGate(permission_repository)
+    personal = personal_brain or PersonalBrain(professional_gate=professional_gate)
 
-    application = FastAPI(title=settings.app_name)
+    application = FastAPI(
+        title=settings.app_name,
+        docs_url=None,  # Disable Swagger UI
+        redoc_url=None,  # Disable ReDoc
+        lifespan=lifespan,
+    )
+
+    # Restrict access to frontend only
+    application.add_middleware(FrontendAccessMiddleware)
 
     @application.get("/health")
     async def health() -> dict[str, str]:
         """Health check endpoint to verify service status."""
         return {"status": "ok"}
 
-    application.include_router(
-        build_pairing_router(
-            settings=settings,
-            pinset_service=pinset_service,
-            pairing_repository=pairing_repository,
-        )
-    )
-
     application.include_router(build_gateway_router())
-    application.include_router(build_sessions_router(pairing_repository))
-    application.include_router(build_streaming_router(provider, memory, friend, audit))
-    application.include_router(build_ops_router(permission_repository))
+    application.include_router(build_streaming_router(provider, memory, personal, audit))
+    application.include_router(build_professional_router(permission_repository))
+    application.include_router(build_auth_router()) # No repo arg needed, uses dependency
+
     from .ingress.audit import build_audit_router  # local import to avoid cycle
 
     application.include_router(build_audit_router(audit))
+
+    # Static Files & SPA Handling
+    # In Docker, we'll copy frontend/dist to /app/static
+    # In Dev, we might want to point to ../frontend/dist if it exists
+    static_dir = Path("static")
+    if not static_dir.exists():
+        static_dir = Path("frontend/dist")
+        if not static_dir.exists():
+            # Fallback for when running from root
+            static_dir = Path("Project-Arthur-/frontend/dist")
+
+    if static_dir.exists():
+        # Mount assets folder
+        if (static_dir / "assets").exists():
+            application.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+
+        # Catch-all for SPA
+        @application.get("/{full_path:path}")
+        async def serve_spa(full_path: str):
+            # Allow API routes to pass through (though they should match earlier)
+            if full_path.startswith("api") or full_path.startswith("ws"):
+                 return {"status": "404", "message": "Not found"}
+
+            file_path = static_dir / full_path
+            if file_path.exists() and file_path.is_file():
+                return FileResponse(file_path)
+            
+            # Fallback to index.html
+            return FileResponse(static_dir / "index.html")
 
     app = application
     return application

@@ -15,14 +15,8 @@ class Settings(BaseSettings):
         host: Host to bind the server to (default: "0.0.0.0").
         port: Port to bind the server to (default: 8000).
         log_level: Logging level (default: "INFO").
-        pairing_db_path: Path to the SQLite pairing database.
-        tls_cert_path: Path to the TLS certificate file.
-        tls_key_path: Path to the TLS key file.
-        tls_pinset_id: Identifier for the current pinset.
-        tls_spki_pin_primary: Primary SPKI pin for key pinning.
-        tls_spki_pin_backup: Backup SPKI pin for key pinning.
         audit_db_path: Path to the SQLite audit database.
-        ops_db_path: Path to the SQLite operations database.
+        professional_db_path: Path to the SQLite professional database.
         memory_db_path: Path to the SQLite memory database.
         openai_api_key: API key for OpenAI (if using OpenAI provider).
         openai_base_url: Base URL for OpenAI API (default: "https://api.openai.com/v1").
@@ -32,15 +26,12 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
-    pairing_db_path: Path = Path("pairing.db")
-    tls_cert_path: Path | None = None
-    tls_key_path: Path | None = None
-    tls_pinset_id: str = "default"
-    tls_spki_pin_primary: str | None = None
-    tls_spki_pin_backup: str | None = None
     audit_db_path: Path = Path("audit.db")
-    ops_db_path: Path = Path("ops.db")
+    professional_db_path: Path = Path("professional.db")
     memory_db_path: Path = Path("memory.db")
+    users_db_path: Path = Path("users.db")
+    # For ORM consolidation, we can assume 'arthur.db' in the same directory as professional_db_path
+    # but the paths above are kept for backward compatibility or if services want split DBs.
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-5.2"

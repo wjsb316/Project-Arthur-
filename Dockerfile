@@ -1,3 +1,11 @@
+# Stage 0: Frontend Builder
+FROM node:18-alpine AS frontend-builder
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ .
+RUN npm run build
+
 # Stage 1: Builder (with CUDA compiler)
 # We use the 'devel' tag which includes nvcc (needed to compile llama-cpp-python with GPU support)
 FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-devel AS builder
@@ -22,12 +30,19 @@ RUN CMAKE_ARGS="-DGGML_CUDA=on" pip wheel --no-cache-dir --wheel-dir /build/whee
 # Stage 2: Runtime (Slim final image)
 FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
 
-# Install runtime system dependencies
+# Install runtime system dependencies including Avahi for mDNS
 RUN apt-get update && apt-get install -y \
     git \
     nano \
     espeak-ng \
+    avahi-daemon \
+    avahi-utils \
+    dbus \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure Avahi to run in container
+RUN sed -i 's/#enable-dbus=yes/enable-dbus=yes/' /etc/avahi/avahi-daemon.conf && \
+    sed -i 's/rlimit-nproc=3/#rlimit-nproc=3/' /etc/avahi/avahi-daemon.conf
 
 # Set the working directory
 WORKDIR /app
@@ -41,8 +56,25 @@ COPY requirements.txt .
 # Install dependencies
 # 1. Install llama-cpp-python specifically from our built wheels (force no PyPI lookup for this package)
 # 2. Install the rest from requirements.txt
-# RUN pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 && \
 RUN pip install --no-cache-dir --no-index --find-links=/wheels llama-cpp-python==0.3.16 && \
     pip install --no-cache-dir -r requirements.txt
 
-# The code will be mounted at runtime via the volume
+# Copy frontend build
+COPY --from=frontend-builder /frontend/dist /app/static
+
+# Copy app code
+COPY . .
+
+# Copy and setup entrypoint
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Copy mDNS service definition
+COPY arthur.service /etc/avahi/services/arthur.service
+
+# Expose API port
+EXPOSE 8000
+# Expose mDNS port
+EXPOSE 5353/udp
+
+ENTRYPOINT ["/entrypoint.sh"]
