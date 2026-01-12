@@ -12,7 +12,6 @@ from ap.protocol.validator import validate_message
 def _settings(tmp_path):
     return Settings(
         ops_db_path=tmp_path / "ops.db",
-        pairing_db_path=tmp_path / "pairing.db",
         memory_db_path=tmp_path / "memory.db",
         tls_spki_pin_primary="sha256/primarypin",
         tls_spki_pin_backup="sha256/secondarypin",

@@ -46,6 +46,7 @@ RUN sed -i 's/#enable-dbus=yes/enable-dbus=yes/' /etc/avahi/avahi-daemon.conf &&
 
 # Set the working directory
 WORKDIR /app
+ENV PYTHONPATH="${PYTHONPATH}:/app"
 
 # Copy built wheels from the builder stage
 COPY --from=builder /build/wheels /wheels
@@ -72,8 +73,6 @@ RUN chmod +x /entrypoint.sh
 # Copy mDNS service definition
 COPY arthur.service /etc/avahi/services/arthur.service
 
-# Expose API port
-EXPOSE 8000
 # Expose mDNS port
 EXPOSE 5353/udp
 
