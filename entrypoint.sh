@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Ensure the current directory (containing 'ap') is in PYTHONPATH
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+
 # Start DBus (required for Avahi)
 mkdir -p /var/run/dbus
 if [ -f /var/run/dbus/pid ]; then
