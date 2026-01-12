@@ -46,7 +46,7 @@ RUN sed -i 's/#enable-dbus=yes/enable-dbus=yes/' /etc/avahi/avahi-daemon.conf &&
 
 # Set the working directory
 WORKDIR /app
-ENV PYTHONPATH="${PYTHONPATH}:/app"
+# ENV PYTHONPATH="${PYTHONPATH}:/app"
 
 # Copy built wheels from the builder stage
 COPY --from=builder /build/wheels /wheels

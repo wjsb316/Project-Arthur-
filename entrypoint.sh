@@ -12,5 +12,6 @@ dbus-daemon --system --fork
 avahi-daemon -D
 
 # Start FastAPI
-# Using --host 0.0.0.0 to make it accessible outside container
-exec uvicorn ap.app:create_app --host 0.0.0.0 --port 8000 --factory
+# Using --host 0.0.0.0 to make it accessible outside container (required for Docker networking)
+# Access control is handled by FrontendAccessMiddleware
+exec uvicorn ap.app:create_app --host "${ARTHUR_HOST:-0.0.0.0}" --port "${ARTHUR_PORT:-8000}" --factory
