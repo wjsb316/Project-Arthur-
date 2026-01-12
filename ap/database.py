@@ -46,9 +46,14 @@ def get_engine():
             @sqlalchemy.event.listens_for(_engine.sync_engine, "connect")
             def load_extensions(dbapi_conn, connection_record):
                 try:
-                    dbapi_conn.enable_load_extension(True)
-                    sqlite_vec.load(dbapi_conn)
-                    dbapi_conn.enable_load_extension(False)
+                    # Access the underlying sqlite3 connection from the aiosqlite wrapper
+                    # dbapi_conn -> AsyncAdapt_aiosqlite_connection
+                    # .driver_connection -> aiosqlite.core.Connection
+                    # ._conn -> sqlite3.Connection
+                    conn = dbapi_conn.driver_connection._conn
+                    conn.enable_load_extension(True)
+                    sqlite_vec.load(conn)
+                    conn.enable_load_extension(False)
                     logger.info("sqlite-vec extension loaded successfully")
                 except Exception as e:
                     logger.warning(f"Failed to load sqlite-vec extension: {e}")
