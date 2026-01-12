@@ -2,7 +2,7 @@
 set -e
 
 # Ensure the current directory (containing 'ap') is in PYTHONPATH
-export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+export PYTHONPATH="/app/Project-Arthur-"
 
 # Start DBus (required for Avahi)
 mkdir -p /var/run/dbus
