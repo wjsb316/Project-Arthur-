@@ -76,4 +76,4 @@ COPY arthur.service /etc/avahi/services/arthur.service
 # Expose mDNS port
 EXPOSE 5353/udp
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/app/Project-Arthur-/entrypoint.sh"]

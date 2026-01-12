@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..models.ops import PermissionRequest, DeliveredNote
+from ..models.professional import PermissionRequest, DeliveredNote
 
 
 class PermissionRepository:
