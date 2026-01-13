@@ -12,4 +12,5 @@ if __name__ == "__main__":
         reload=False,
         factory=True,
         log_level=settings.log_level.lower(),
+        timeout_keep_alive=75,
     )

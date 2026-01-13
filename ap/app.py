@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 
 from .config import Settings, load_settings
@@ -73,6 +74,14 @@ def create_app(
 
     # Restrict access to frontend only
     application.add_middleware(FrontendAccessMiddleware)
+    
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Adjust this to your specific frontend origin in production
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @application.get("/health")
     async def health() -> dict[str, str]:
