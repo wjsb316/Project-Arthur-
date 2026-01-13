@@ -13,5 +13,13 @@ Run container in WSL
     docker run --rm -v AP-engine:/app alpine/git clone https://github.com/wjsb316/Project-Arthur-.git /app
     docker run --gpus all -it --rm -v AP-engine:/app pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
 Development environment
+    cd /home/arthur/Project-Arthur-
     docker build -t project-arthur Project-Arthur-
-    docker run --name arthur-prime --gpus all -d --rm -p 8000:8000 -v /home/arthur/Project-Arthur-:/app/Project-Arthur- project-arthur /entrypoint.sh
+    docker run --name arthur-prime --gpus all -d --rm -p 8000:8000   -v /home/arthur/Project-Arthur-:/app   --entrypoint /app/entrypoint.sh   project-arthur
+
+    If I need to restart container to reflect backend changes:
+        docker restart arthur-prime
+
+    cd /home/arthur/Project-Arthur-/frontend
+    npm install
+    npm run dev

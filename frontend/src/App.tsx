@@ -17,6 +17,40 @@ function App() {
     if (token) setView('dashboard');
   }, [token]);
 
+  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState<Array<{role: string, content: string}>>([]);
+
+  const handleChatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    
+    const userMessage = { role: 'user', content: chatInput };
+    setChatHistory(prev => [...prev, userMessage]);
+    setChatInput('');
+
+    try {
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                ...API_HEADERS
+            },
+            body: JSON.stringify({ text: userMessage.content }),
+        });
+        
+        if (res.ok) {
+            // Ideally we'd get a response back. For now just acknowledgment or updated history.
+            // const data = await res.json();
+            // setChatHistory(prev => [...prev, { role: 'assistant', content: data.response }]);
+        } else {
+            console.error("Failed to send chat message");
+        }
+    } catch (err) {
+        console.error(err);
+    }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new URLSearchParams();
@@ -111,9 +145,24 @@ function App() {
             
             <div className="card features">
                 <h2>Assistant</h2>
-                <div className="placeholder-box">
-                    <p>Microphone / Chat Interface Loading...</p>
-                    {/* Integration point for STT/LLM/TTS */}
+                <div className="chat-container">
+                    <div className="chat-history">
+                        {chatHistory.map((msg, i) => (
+                            <div key={i} className={`chat-message ${msg.role}`}>
+                                <strong>{msg.role}: </strong>{msg.content}
+                            </div>
+                        ))}
+                    </div>
+                    <form onSubmit={handleChatSubmit} className="chat-input-form">
+                        <input 
+                            type="text" 
+                            value={chatInput} 
+                            onChange={(e) => setChatInput(e.target.value)} 
+                            placeholder="Type a message..." 
+                            className="chat-input"
+                        />
+                        <button type="submit" className="chat-submit-btn">Send</button>
+                    </form>
                 </div>
             </div>
         </main>

@@ -11,6 +11,7 @@ from .ingress.gateway import build_gateway_router
 from .ingress.streaming import build_streaming_router
 from .ingress.professional import build_professional_router
 from .ingress.auth import build_auth_router
+from .ingress.chat import router as chat_router
 from .logging_config import configure_logging
 from .memory import MemoryStore
 from .persistence.permissions import PermissionRepository
@@ -82,6 +83,7 @@ def create_app(
     application.include_router(build_streaming_router(provider, memory, personal, audit))
     application.include_router(build_professional_router(permission_repository))
     application.include_router(build_auth_router()) # No repo arg needed, uses dependency
+    application.include_router(chat_router)
 
     from .ingress.audit import build_audit_router  # local import to avoid cycle
 

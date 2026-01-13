@@ -38,7 +38,18 @@ RUN apt-get update && apt-get install -y \
     avahi-daemon \
     avahi-utils \
     dbus \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
+
+# # Ensure CUDA libraries are in LD_LIBRARY_PATH
+# # We add both the standard system location and the python package location found in this specific image
+# ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH}
+
+# # Create a symlink for libcudart.so.11.0 pointing to libcudart.so.12
+# # This is a workaround for gpt4all/llama-cpp binding explicitly looking for version 11
+# RUN ln -s /opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.12 \
+#     /opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.11.0
+
 
 # Configure Avahi to run in container
 RUN sed -i 's/#enable-dbus=yes/enable-dbus=yes/' /etc/avahi/avahi-daemon.conf && \

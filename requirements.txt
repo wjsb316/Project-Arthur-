@@ -15,6 +15,7 @@ langchain-openai
 python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
+# nomic
 
 # NeuTTS Air 
 #llama-cpp-python==0.3.16 # skipping because GPU custom wheel is being built in Dockerfile
@@ -26,3 +27,10 @@ soundfile==0.13.1
 transformers==4.56.1
 resemble-perth==1.0.1
 #pyaudio # For streaming audio in chunks
+
+# Langchain-nomic for vector storage
+# langchain-nomic==1.0.1
+# gpt4all==2.8.2
+
+# modernbert-embed-base for embeddings generation
+sentence-transformers==5.2.0

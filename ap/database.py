@@ -92,3 +92,9 @@ async def init_db():
                     embedding float[384]
                 );
             """))
+            await conn.execute(text("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS chat_message_vectors USING vec0(
+                    id INTEGER PRIMARY KEY,
+                    embedding float[256]
+                );
+            """))
