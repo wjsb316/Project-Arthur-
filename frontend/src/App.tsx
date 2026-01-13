@@ -6,6 +6,14 @@ const API_HEADERS = {
 };
 
 // Icons
+const IconMenu = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="3" y1="12" x2="21" y2="12"></line>
+    <line x1="3" y1="6" x2="21" y2="6"></line>
+    <line x1="3" y1="18" x2="21" y2="18"></line>
+  </svg>
+);
+
 const IconDashboard = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="3" width="7" height="7"></rect>
@@ -47,6 +55,7 @@ function App() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Check valid token on load (optional: verify with backend)
   useEffect(() => {
@@ -179,7 +188,16 @@ function App() {
   if (['dashboard', 'help', 'settings'].includes(view)) {
     return (
       <div className="app-layout">
-        <aside className="sidebar">
+        <header className="mobile-header">
+            <button className="menu-btn" onClick={() => setIsSidebarOpen(true)}>
+                <IconMenu />
+            </button>
+            <span className="mobile-brand">Arthur Prime</span>
+        </header>
+        
+        {isSidebarOpen && <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)} />}
+
+        <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
             <div className="sidebar-header">
                 <IconCat />
                 <div className="brand-text">
@@ -190,21 +208,30 @@ function App() {
             <nav className="sidebar-nav">
                 <button 
                     className={`nav-item ${view === 'dashboard' ? 'active' : ''}`}
-                    onClick={() => setView('dashboard')}
+                    onClick={() => {
+                        setView('dashboard');
+                        setIsSidebarOpen(false);
+                    }}
                 >
                     <IconDashboard />
                     <span>Chat</span>
                 </button>
                 <button 
                     className={`nav-item ${view === 'help' ? 'active' : ''}`}
-                    onClick={() => setView('help')}
+                    onClick={() => {
+                        setView('help');
+                        setIsSidebarOpen(false);
+                    }}
                 >
                     <IconHelp />
                     <span>Help</span>
                 </button>
                 <button 
                     className={`nav-item ${view === 'settings' ? 'active' : ''}`}
-                    onClick={() => setView('settings')}
+                    onClick={() => {
+                        setView('settings');
+                        setIsSidebarOpen(false);
+                    }}
                 >
                     <IconSettings />
                     <span>Settings</span>
