@@ -137,6 +137,16 @@ def build_auth_router() -> APIRouter:
                 detail=f"Registration failed: {str(e)}"
             )
 
+    @router.get("/users/me", response_model=UserResponse)
+    async def read_users_me(
+        current_user: Annotated[User, Depends(get_current_user)],
+    ):
+        return UserResponse(
+            user_id=current_user.user_id,
+            username=current_user.username,
+            created_at=str(current_user.created_at)
+        )
+
     @router.delete("/users/me")
     async def delete_me(
         current_user: Annotated[User, Depends(get_current_user)],
