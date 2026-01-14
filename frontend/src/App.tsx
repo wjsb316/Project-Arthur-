@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Send } from 'lucide-react';
 import './App.css';
 
 const API_HEADERS = {
@@ -23,9 +24,19 @@ const IconDashboard = () => (
   </svg>
 );
 
-const IconHelp = () => (
+const IconHistory = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+    <circle cx="12" cy="12" r="10"></circle>
+    <polyline points="12 6 12 12 16 14"></polyline>
+  </svg>
+);
+
+const IconAgents = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+    <circle cx="9" cy="7" r="4"></circle>
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
   </svg>
 );
 
@@ -42,20 +53,20 @@ const IconCat = () => (
     </svg>
 );
 
-const IconSend = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="22" y1="2" x2="11" y2="13"></line>
-    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-  </svg>
-);
 
 function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'help' | 'settings'>('login');
+  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'history' | 'agents' | 'settings'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Agents State
+  const [agents, setAgents] = useState<Array<{id: number, name: string, prompt: string, created_at?: string}>>([]);
+  const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentPrompt, setNewAgentPrompt] = useState('');
+  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
 
   // Check valid token on load (optional: verify with backend)
   useEffect(() => {
@@ -81,6 +92,157 @@ function App() {
 
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState<Array<{role: string, content: string}>>([]);
+  const [fullHistory, setFullHistory] = useState<Array<any>>([]);
+  const [selectedSessions, setSelectedSessions] = useState<number[]>([]);
+  const [nukeProgress, setNukeProgress] = useState(0);
+  const nukeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (view === 'history' && token) {
+        fetchHistory();
+    }
+    if (view === 'agents' && token) {
+        fetchAgents();
+    }
+  }, [view, token]);
+
+  const fetchAgents = () => {
+    // The router prefix is /api/agents
+    fetch('/api/agents/', { 
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            ...API_HEADERS
+        }
+    })
+    .then(res => res.json())
+    .then(data => setAgents(data))
+    .catch(console.error);
+  };
+
+  const handleCreateAgent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAgentName.trim() || !newAgentPrompt.trim()) return;
+
+    try {
+        const res = await fetch('/api/agents/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                ...API_HEADERS
+            },
+            body: JSON.stringify({ name: newAgentName, prompt: newAgentPrompt })
+        });
+        if (res.ok) {
+            setNewAgentName('');
+            setNewAgentPrompt('');
+            setIsCreatingAgent(false);
+            fetchAgents();
+        }
+    } catch (e) {
+        console.error(e);
+    }
+  };
+
+  const handleDeleteAgent = async (id: number) => {
+      if(!confirm("Delete this agent?")) return;
+      try {
+          const res = await fetch(`/api/agents/${id}`, {
+              method: 'DELETE',
+              headers: {
+                  'Authorization': `Bearer ${token}`,
+                  ...API_HEADERS
+              }
+          });
+          if (res.ok) fetchAgents();
+      } catch (e) {
+          console.error(e);
+      }
+  };
+
+  const fetchHistory = () => {
+      fetch('/api/chat/history', {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                ...API_HEADERS
+            }
+        })
+        .then(res => res.json())
+        .then(data => {
+            setFullHistory(data);
+            setSelectedSessions([]);
+        })
+        .catch(console.error);
+  }
+
+  const toggleSession = (id: number) => {
+      setSelectedSessions(prev => 
+        prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
+      );
+  };
+
+  const handleDeleteSelected = async () => {
+      if (selectedSessions.length === 0) return;
+      if (!confirm(`Delete ${selectedSessions.length} sessions?`)) return;
+
+      try {
+          const res = await fetch('/api/chat/sessions', {
+              method: 'DELETE',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`,
+                  ...API_HEADERS
+              },
+              body: JSON.stringify({ session_ids: selectedSessions })
+          });
+          if (res.ok) {
+              fetchHistory();
+          }
+      } catch (e) {
+          console.error(e);
+      }
+  };
+
+  const startNuke = () => {
+    let progress = 0;
+    if (nukeTimerRef.current) clearInterval(nukeTimerRef.current);
+    
+    nukeTimerRef.current = window.setInterval(() => {
+        progress += 4; // 25 steps * 40ms = 1000ms
+        setNukeProgress(progress);
+        if (progress >= 100) {
+            if(nukeTimerRef.current) clearInterval(nukeTimerRef.current);
+            handleNukeHistory();
+            setNukeProgress(0);
+        }
+    }, 40);
+  };
+
+  const cancelNuke = () => {
+      if (nukeTimerRef.current) {
+          clearInterval(nukeTimerRef.current);
+          nukeTimerRef.current = null;
+      }
+      setNukeProgress(0);
+  };
+
+  const handleNukeHistory = async () => {
+      try {
+          const res = await fetch('/api/chat/history', {
+              method: 'DELETE',
+              headers: {
+                  'Authorization': `Bearer ${token}`,
+                  ...API_HEADERS
+              }
+          });
+          if (res.ok) {
+              alert("HISTORY NUKED");
+              fetchHistory();
+          }
+      } catch (e) {
+          console.error(e);
+      }
+  };
 
   const handleChatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,7 +347,7 @@ function App() {
       }
   }
 
-  if (['dashboard', 'help', 'settings'].includes(view)) {
+  if (['dashboard', 'history', 'agents', 'settings'].includes(view)) {
     return (
       <div className="app-layout">
         <header className="mobile-header">
@@ -217,14 +379,24 @@ function App() {
                     <span>Chat</span>
                 </button>
                 <button 
-                    className={`nav-item ${view === 'help' ? 'active' : ''}`}
+                    className={`nav-item ${view === 'history' ? 'active' : ''}`}
                     onClick={() => {
-                        setView('help');
+                        setView('history');
                         setIsSidebarOpen(false);
                     }}
                 >
-                    <IconHelp />
-                    <span>Help</span>
+                    <IconHistory />
+                    <span>Chat History</span>
+                </button>
+                <button 
+                    className={`nav-item ${view === 'agents' ? 'active' : ''}`}
+                    onClick={() => {
+                        setView('agents');
+                        setIsSidebarOpen(false);
+                    }}
+                >
+                    <IconAgents />
+                    <span>Agents</span>
                 </button>
                 <button 
                     className={`nav-item ${view === 'settings' ? 'active' : ''}`}
@@ -281,14 +453,168 @@ function App() {
                                 placeholder="Type your message..." 
                             />
                             <button type="submit" className="send-btn">
-                                <IconSend />
+                                <Send size={20} />
                             </button>
                         </form>
                     </div>
                 </div>
             )}
             
-            {view !== 'dashboard' && (
+            {view === 'history' && (
+                <div className="history-view" style={{ padding: '2rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h2>Chat History</h2>
+                        <button 
+                            onClick={handleDeleteSelected}
+                            disabled={selectedSessions.length === 0}
+                            style={{
+                                backgroundColor: selectedSessions.length > 0 ? '#ef4444' : '#e2e8f0',
+                                color: selectedSessions.length > 0 ? 'white' : '#94a3b8',
+                                border: 'none',
+                                padding: '0.5rem 1rem',
+                                borderRadius: '4px',
+                                cursor: selectedSessions.length > 0 ? 'pointer' : 'not-allowed',
+                                fontWeight: '600'
+                            }}
+                        >
+                            Delete Selected ({selectedSessions.length})
+                        </button>
+                    </div>
+
+                    <div className="history-list" style={{ flex: 1, overflowY: 'auto' }}>
+                        {fullHistory.map((session: any) => (
+                            <div key={session.id} style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', alignItems: 'flex-start' }}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={selectedSessions.includes(session.id)}
+                                    onChange={() => toggleSession(session.id)}
+                                    style={{ marginTop: '1rem', width: '20px', height: '20px' }}
+                                />
+                                <div style={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '8px', padding: '1rem', background: 'white' }}>
+                                    <div style={{ borderBottom: '1px solid #eee', paddingBottom: '0.5rem', marginBottom: '1rem', color: '#64748b', fontSize: '0.9rem' }}>
+                                        Session {session.id} • {session.created_at}
+                                    </div>
+                                    {session.messages.map((msg: any, i: number) => (
+                                        <div key={i} style={{ marginBottom: '0.5rem', fontFamily: 'monospace', fontSize: '0.9rem' }}>
+                                            <div style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{msg.created_at}</div>
+                                            <div><strong>{msg.role}:</strong> {msg.content}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+                        <button
+                            onMouseDown={startNuke}
+                            onMouseUp={cancelNuke}
+                            onMouseLeave={cancelNuke}
+                            onTouchStart={startNuke}
+                            onTouchEnd={cancelNuke}
+                            style={{
+                                background: `linear-gradient(to right, #dc2626 ${nukeProgress}%, #ef4444 ${nukeProgress}%)`,
+                                color: 'white',
+                                border: 'none',
+                                padding: '.5rem',
+                                width: '100%',
+                                maxWidth: '200px',
+                                borderRadius: '4px',
+                                fontSize: '1.2rem',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                transition: 'background 0.1s linear',
+                                userSelect: 'none'
+                            }}
+                        >
+                            {nukeProgress > 0 ? `HOLD TO NUKE... ${nukeProgress}%` : 'NUKE HISTORY'}
+                        </button>
+                        <p style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.5rem' }}>Press and hold to delete all history</p>
+                    </div>
+                </div>
+            )}
+
+            {view === 'agents' && (
+                <div className="agents-view" style={{ padding: '2rem', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                        <h2>Agents</h2>
+                        <button 
+                            onClick={() => setIsCreatingAgent(!isCreatingAgent)}
+                            className="primary-btn"
+                            style={{ 
+                              width: 'auto',
+                              padding: '.5rem'
+                             }}
+                        >
+                            {isCreatingAgent ? 'Cancel' : 'Create Agent'}
+                        </button>
+                    </div>
+
+                    {isCreatingAgent && (
+                        <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '2rem' }}>
+                            <h3>New Agent</h3>
+                            <form onSubmit={handleCreateAgent}>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Name</label>
+                                    <input 
+                                        value={newAgentName} 
+                                        onChange={e => setNewAgentName(e.target.value)} 
+                                        placeholder="e.g. Creative Writer"
+                                        style={{ background: 'white', color: '#1e293b', border: '1px solid #cbd5e1' }}
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Prompt</label>
+                                    <textarea 
+                                        value={newAgentPrompt} 
+                                        onChange={e => setNewAgentPrompt(e.target.value)} 
+                                        placeholder="You are a helpful creative writer..."
+                                        style={{ 
+                                            width: '100%', 
+                                            padding: '0.5rem', 
+                                            borderRadius: '4px', 
+                                            border: '1px solid #cbd5e1', 
+                                            minHeight: '100px',
+                                            fontFamily: 'inherit'
+                                        }}
+                                        required
+                                    />
+                                </div>
+                                <button type="submit" className="primary-btn">Save Agent</button>
+                            </form>
+                        </div>
+                    )}
+
+                    <div className="agents-list" style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                        {agents.map(agent => (
+                            <div key={agent.id} style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', position: 'relative' }}>
+                                <button 
+                                    onClick={() => handleDeleteAgent(agent.id)}
+                                    style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                                    title="Delete Agent"
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                                <h3 style={{ margin: '0 0 0.5rem 0' }}>{agent.name}</h3>
+                                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+                                    Created: {new Date(agent.created_at || Date.now()).toLocaleDateString()}
+                                </div>
+                                <div style={{ fontSize: '0.9rem', color: '#64748b', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto' }}>
+                                    {agent.prompt}
+                                </div>
+                            </div>
+                        ))}
+                        {agents.length === 0 && !isCreatingAgent && (
+                            <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>
+                                No agents found. Create one to get started.
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+            
+            {view !== 'dashboard' && view !== 'history' && view !== 'agents' && (
                 <div className="content-placeholder">
                     <h2>{view.charAt(0).toUpperCase() + view.slice(1)}</h2>
                     <p>This section is under construction.</p>

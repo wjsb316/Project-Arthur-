@@ -9,7 +9,8 @@ from ..professional_brain import ProfessionalBrainGate
 
 @dataclass
 class PersonalBrain:
-    """Applies a consistent, empathetic tone while respecting ProfessionalBrain decisions.
+    """
+    Applies a consistent, empathetic tone while respecting ProfessionalBrain decisions.
     
     PersonalBrain acts as the 'personality' layer. It takes raw text or intent
     and wraps it in the assistant's persona (empathetic, reflective, solution-oriented).

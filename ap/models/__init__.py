@@ -3,6 +3,7 @@ from .users import User
 from .memory import Memory
 from .professional import PermissionRequest, DeliveredNote
 from .audit import AuditLogEntry
+from .agents import Agent
 
 __all__ = [
     "ModelProvider", 
@@ -12,5 +13,6 @@ __all__ = [
     "Memory",
     "PermissionRequest", 
     "DeliveredNote",
-    "AuditLogEntry"
+    "AuditLogEntry",
+    "Agent"
 ]
