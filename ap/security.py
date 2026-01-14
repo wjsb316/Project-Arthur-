@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 # These should be loaded from settings/env in a real app
 SECRET_KEY = "your-secret-key-change-me"  # TODO: Move to config
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 10080
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

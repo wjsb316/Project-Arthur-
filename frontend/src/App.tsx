@@ -67,17 +67,36 @@ function App() {
   const [newAgentName, setNewAgentName] = useState('');
   const [newAgentPrompt, setNewAgentPrompt] = useState('');
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+  const [isSessionExpired, setIsSessionExpired] = useState(false);
+
+  const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
+      const headers = {
+          'Authorization': `Bearer ${token}`,
+          ...API_HEADERS,
+          ...((options.headers as Record<string, string>) || {})
+      };
+      
+      const res = await fetch(url, { ...options, headers });
+      if (res.status === 401) {
+          setIsSessionExpired(true);
+      }
+      return res;
+  };
+
+  const handleNavigation = (newView: typeof view) => {
+      if (isSessionExpired) {
+          handleLogout();
+          return;
+      }
+      setView(newView);
+      setIsSidebarOpen(false);
+  };
 
   // Check valid token on load (optional: verify with backend)
   useEffect(() => {
     if (token) {
         setView('dashboard');
-        fetch('/users/me', {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                ...API_HEADERS
-            }
-        })
+        authenticatedFetch('/users/me')
         .then(res => {
             if (res.ok) return res.json();
             // If token is invalid, we might want to logout, but for now just log error
@@ -108,12 +127,7 @@ function App() {
 
   const fetchAgents = () => {
     // The router prefix is /api/agents
-    fetch('/api/agents/', { 
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            ...API_HEADERS
-        }
-    })
+    authenticatedFetch('/api/agents/')
     .then(res => res.json())
     .then(data => setAgents(data))
     .catch(console.error);
@@ -124,12 +138,10 @@ function App() {
     if (!newAgentName.trim() || !newAgentPrompt.trim()) return;
 
     try {
-        const res = await fetch('/api/agents/', {
+        const res = await authenticatedFetch('/api/agents/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                ...API_HEADERS
             },
             body: JSON.stringify({ name: newAgentName, prompt: newAgentPrompt })
         });
@@ -147,12 +159,8 @@ function App() {
   const handleDeleteAgent = async (id: number) => {
       if(!confirm("Delete this agent?")) return;
       try {
-          const res = await fetch(`/api/agents/${id}`, {
+          const res = await authenticatedFetch(`/api/agents/${id}`, {
               method: 'DELETE',
-              headers: {
-                  'Authorization': `Bearer ${token}`,
-                  ...API_HEADERS
-              }
           });
           if (res.ok) fetchAgents();
       } catch (e) {
@@ -161,12 +169,7 @@ function App() {
   };
 
   const fetchHistory = () => {
-      fetch('/api/chat/history', {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                ...API_HEADERS
-            }
-        })
+      authenticatedFetch('/api/chat/history')
         .then(res => res.json())
         .then(data => {
             setFullHistory(data);
@@ -186,12 +189,10 @@ function App() {
       if (!confirm(`Delete ${selectedSessions.length} sessions?`)) return;
 
       try {
-          const res = await fetch('/api/chat/sessions', {
+          const res = await authenticatedFetch('/api/chat/sessions', {
               method: 'DELETE',
               headers: {
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`,
-                  ...API_HEADERS
               },
               body: JSON.stringify({ session_ids: selectedSessions })
           });
@@ -228,12 +229,8 @@ function App() {
 
   const handleNukeHistory = async () => {
       try {
-          const res = await fetch('/api/chat/history', {
+          const res = await authenticatedFetch('/api/chat/history', {
               method: 'DELETE',
-              headers: {
-                  'Authorization': `Bearer ${token}`,
-                  ...API_HEADERS
-              }
           });
           if (res.ok) {
               alert("HISTORY NUKED");
@@ -253,12 +250,10 @@ function App() {
     setChatInput('');
 
     try {
-        const res = await fetch('/api/chat', {
+        const res = await authenticatedFetch('/api/chat', {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                ...API_HEADERS
             },
             body: JSON.stringify({ text: userMessage.content }),
         });
@@ -328,17 +323,14 @@ function App() {
     setView('login');
     setUsername('');
     setPassword('');
+    setIsSessionExpired(false);
   };
   
   const handleDeleteAccount = async () => {
       if(!confirm("Are you sure? This cannot be undone.")) return;
       try {
-          const res = await fetch('/users/me', {
+          const res = await authenticatedFetch('/users/me', {
               method: 'DELETE',
-              headers: { 
-                  'Authorization': `Bearer ${token}`,
-                  ...API_HEADERS
-              }
           });
           if(res.ok) handleLogout();
           else alert("Failed to delete");
@@ -370,40 +362,28 @@ function App() {
             <nav className="sidebar-nav">
                 <button 
                     className={`nav-item ${view === 'dashboard' ? 'active' : ''}`}
-                    onClick={() => {
-                        setView('dashboard');
-                        setIsSidebarOpen(false);
-                    }}
+                    onClick={() => handleNavigation('dashboard')}
                 >
                     <IconDashboard />
                     <span>Chat</span>
                 </button>
                 <button 
                     className={`nav-item ${view === 'history' ? 'active' : ''}`}
-                    onClick={() => {
-                        setView('history');
-                        setIsSidebarOpen(false);
-                    }}
+                    onClick={() => handleNavigation('history')}
                 >
                     <IconHistory />
                     <span>Chat History</span>
                 </button>
                 <button 
                     className={`nav-item ${view === 'agents' ? 'active' : ''}`}
-                    onClick={() => {
-                        setView('agents');
-                        setIsSidebarOpen(false);
-                    }}
+                    onClick={() => handleNavigation('agents')}
                 >
                     <IconAgents />
                     <span>Agents</span>
                 </button>
                 <button 
                     className={`nav-item ${view === 'settings' ? 'active' : ''}`}
-                    onClick={() => {
-                        setView('settings');
-                        setIsSidebarOpen(false);
-                    }}
+                    onClick={() => handleNavigation('settings')}
                 >
                     <IconSettings />
                     <span>Settings</span>

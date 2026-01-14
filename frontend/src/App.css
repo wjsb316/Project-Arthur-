@@ -4,7 +4,7 @@
   --bg-color: #f8f9fc;
   --text-color: #1e293b;
   --sidebar-bg: #ffffff;
-  --primary-color: #6366f1;
+  --primary-color: #335742;
   --border-color: #e2e8f0;
 }
 
@@ -332,7 +332,7 @@ body {
 .link-btn {
     background: none;
     border: none;
-    color: #646cff;
+    color: #335742;
     cursor: pointer;
     text-decoration: underline;
 }
