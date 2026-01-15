@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings
 
 
@@ -32,9 +32,9 @@ class Settings(BaseSettings):
     users_db_path: Path = Path("users.db")
     # For ORM consolidation, we can assume 'arthur.db' in the same directory as professional_db_path
     # but the paths above are kept for backward compatibility or if services want split DBs.
-    openai_api_key: str | None = None
-    openai_base_url: str = "https://api.openai.com/v1"
-    openai_model: str = "gpt-5.2"
+    openai_api_key: str | None = Field(default=None, validation_alias="XAI_KEY")
+    openai_base_url: str = "https://api.x.ai/v1"
+    openai_model: str = "grok-4-fast-reasoning"
 
     class Config:
         env_prefix = "ARTHUR_"

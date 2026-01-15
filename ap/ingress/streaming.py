@@ -83,9 +83,10 @@ def build_streaming_router(
         Process:
         1. Validate schema and payload.
         2. Check model provider health.
-        3. Use LangGraph agent to retrieve memory & chat history context.
-        4. Store user input in short-term memory (scoped to user).
-        5. Stream response via Server-Sent Events (SSE) logic over JSON-lines.
+        3. Store user input in Chat History (Closed Loop).
+        4. Use LangGraph agent to retrieve memory & chat history context.
+        5. Store user input in short-term memory (scoped to user).
+        6. Stream response via Server-Sent Events (SSE) logic over JSON-lines.
         """
         try:
             validate_message(message)
@@ -118,10 +119,29 @@ def build_streaming_router(
 
         _ensure_provider_ready(await provider.health_check(), audit_log, trace_id)
 
+        # 1. Get/Create Session & Save User Message (Closed Loop)
+        session_id = None
+        try:
+            session_id = await chat_store.get_or_create_recent_session(
+                current_user.user_id, 
+                title_hint=text
+            )
+            # Save User Message with Embedding
+            await chat_store.save_message(
+                session_id=session_id,
+                user_id=current_user.user_id,
+                role="user",
+                content=text
+            )
+        except Exception as e:
+            logger.error(f"Failed to save user message/session: {e}")
+            # Proceeding without session linkage if DB fails, but logging it.
+
         # Execute LangGraph for Context Retrieval and Generation Setup
         initial_state = {
             "user_input": text,
             "user_id": current_user.user_id,
+            "session_id": session_id,
             "trace_id": trace_id,
             "stream_id": message["id"],
             "memories": [],
@@ -133,7 +153,7 @@ def build_streaming_router(
         
         final_state = await agent_graph.ainvoke(initial_state)
         
-        # Store open loop (fire and forget / async)
+        # Store open loop (fire and forget / async) - Short Term Memory
         await memory_store.store_open_loop(text, current_user.user_id)
 
         audit_log.append(

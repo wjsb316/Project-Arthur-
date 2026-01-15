@@ -54,6 +54,14 @@ const IconSettings = () => (
   </svg>
 );
 
+const IconNewChat = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+     <line x1="12" y1="7" x2="12" y2="13"></line>
+     <line x1="9" y1="10" x2="15" y2="10"></line>
+  </svg>
+);
+
 const IconCat = () => (
     <svg width="40" height="40" viewBox="0 0 24 24" fill="black" stroke="none">
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h2v2H7v-2zm8 0h2v2h-2v-2zm-4 4h4v2h-4v-2z"/>
@@ -111,6 +119,17 @@ function App() {
   const [historySearch, setHistorySearch] = useState('');
   const [nukeProgress, setNukeProgress] = useState(0);
   const nukeTimerRef = useRef<number | null>(null);
+  
+  const [isNewSession, setIsNewSession] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+      scrollToBottom();
+  }, [chatHistory]);
 
   useEffect(() => {
     if (view === 'history' && token) {
@@ -332,6 +351,12 @@ function App() {
       }
   };
 
+  const handleNewChat = () => {
+      setChatHistory([]);
+      setIsNewSession(true);
+      if (view !== 'dashboard') setView('dashboard');
+  };
+
   const handleChatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
@@ -341,6 +366,14 @@ function App() {
     setChatInput('');
 
     try {
+        const payload = { 
+            text: userMessage.content,
+            new_session: isNewSession
+        };
+        
+        // Reset the flag immediately so subsequent messages in this session aren't treated as new
+        if (isNewSession) setIsNewSession(false);
+
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 
@@ -348,11 +381,14 @@ function App() {
                 'Authorization': `Bearer ${token}`,
                 ...API_HEADERS
             },
-            body: JSON.stringify({ text: userMessage.content }),
+            body: JSON.stringify(payload),
         });
         
         if (res.ok) {
-            // Ideally we'd get a response back. For now just acknowledgment or updated history.
+            const data = await res.json();
+            if (data.response) {
+                setChatHistory(prev => [...prev, { role: 'Arthur', content: data.response.content }]);
+            }
         } else {
             console.error("Failed to send chat message");
         }
@@ -523,23 +559,43 @@ function App() {
             {view === 'dashboard' && (
                 <div className="chat-interface">
                     <header className="chat-header">
-                        <h1>Arthur Prime</h1>
-                        <p>At your service.</p>
+                        <div>
+                            <h1>Arthur Prime</h1>
+                        </div>
+                        <button 
+                            onClick={handleNewChat}
+                            title="Start New Chat"
+                            style={{
+                                background: 'transparent',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '8px',
+                                padding: '0.5rem',
+                                cursor: 'pointer',
+                                color: '#64748b',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem'
+                            }}
+                        >
+                            <IconNewChat />
+                            <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>New Chat</span>
+                        </button>
                     </header>
 
                     <div className="chat-area">
                         {chatHistory.length === 0 && (
                             <div className="chat-message assistant">
                                 <div className="message-icon"><IconCat /></div>
-                                <div className="message-content">Hello, how can I help you?</div>
+                                <div className="message-content">Arthur Prime at your service.</div>
                             </div>
                         )}
                         {chatHistory.map((msg, i) => (
                             <div key={i} className={`chat-message ${msg.role}`}>
-                                {msg.role === 'assistant' && <div className="message-icon"><IconCat /></div>}
+                                {(msg.role === 'assistant' || msg.role === 'Arthur') && <div className="message-icon"><IconCat /></div>}
                                 <div className="message-content">{msg.content}</div>
                             </div>
                         ))}
+                        <div ref={messagesEndRef} />
                     </div>
 
                     <div className="input-area">

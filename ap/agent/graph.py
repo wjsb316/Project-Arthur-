@@ -63,6 +63,9 @@ class StreamState:
     stream_id: str
     trace_id: str | None
     text: str
+    user_id: str | None = None
+    session_id: int | None = None
+    chat_store: ChatStore | None = None
 
 
 def _clamp_score(value: float) -> float:
@@ -145,6 +148,20 @@ async def _assistant_stream(
 
         final_text = "".join(tokens) if tokens else state.text
         toned_text = personal_brain.apply_tone(final_text)
+
+        # Closed Loop: Save response to ChatStore
+        if state.chat_store and state.session_id and state.user_id:
+            try:
+                await state.chat_store.save_message(
+                    session_id=state.session_id,
+                    user_id=state.user_id,
+                    role="Arthur",
+                    content=toned_text
+                )
+                logger.info(f"Saved assistant response for session {state.session_id}")
+            except Exception as e:
+                logger.error(f"Failed to save assistant message: {e}")
+
         confidence, model_health = await _build_confidence_and_health(provider)
         final = {
             "id": state.stream_id,
@@ -183,6 +200,7 @@ class AgentState(TypedDict):
     """State of the agent workflow."""
     user_input: str
     user_id: str
+    session_id: int | None
     trace_id: str
     stream_id: str
     
@@ -273,7 +291,8 @@ def generate_response(
     manager: StreamManager,
     provider: ModelProvider,
     personal_brain: PersonalBrain,
-    audit_log: AuditLog
+    audit_log: AuditLog,
+    chat_store: ChatStore
 ) -> dict:
     """Node: Prepare the response generator."""
     # Register the stream
@@ -282,7 +301,10 @@ def generate_response(
     stream_state = StreamState(
         stream_id=state["stream_id"],
         trace_id=state["trace_id"],
-        text=state["final_prompt"]
+        text=state["final_prompt"],
+        user_id=state["user_id"],
+        session_id=state.get("session_id"),
+        chat_store=chat_store
     )
     
     # Create the generator
@@ -304,9 +326,7 @@ def build_agent_graph(
     provider: ModelProvider,
     personal_brain: PersonalBrain,
     audit_log: AuditLog,
-    stream_manager: StreamManager # Added this dependency, or instantiate it? 
-    # Better to pass StreamManager so we can share it if needed, or instantiate here if lifecycle allows.
-    # streaming.py instantiates it.
+    stream_manager: StreamManager
 ) -> StateGraph:
     """Construct the LangGraph workflow."""
     
@@ -325,7 +345,8 @@ def build_agent_graph(
             stream_manager, 
             provider, 
             personal_brain, 
-            audit_log
+            audit_log,
+            chat_store
         )
 
     workflow = StateGraph(AgentState)
@@ -339,10 +360,7 @@ def build_agent_graph(
     # Start -> Parallel Retrieval
     workflow.set_entry_point("retrieve_memories")
     
-    # Parallel edges? LangGraph 0.1+ syntax is slightly different for parallel.
-    # We can just chain for now to be safe and simple, or branch.
-    # Simple sequential: memories -> history -> agents -> bundle -> generate
-    
+    # Sequential Chain
     workflow.add_edge("retrieve_memories", "retrieve_history")
     workflow.add_edge("retrieve_history", "retrieve_agents")
     workflow.add_edge("retrieve_agents", "bundle")

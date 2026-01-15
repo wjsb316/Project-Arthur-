@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import logging
+import json
 from typing import List, Optional
+from sqlalchemy import select, text
+from datetime import datetime, timezone
 
 from .retrieval import VectorRetriever
-from ..models.chat import ChatMessage
+from ..models.chat import ChatMessage, ChatSession
+from ..utils.embedding_factory import embedding_factory
 
 logger = logging.getLogger("arthur.ap.persistence.chat")
 
 class ChatStore:
-    """Read-only interface for retrieving relevant chat history."""
+    """Interface for retrieving and storing chat history."""
 
     def __init__(self, session_factory):
+        self._session_factory = session_factory
         self._retriever = VectorRetriever(session_factory)
 
     async def retrieve_relevant_history(
@@ -26,20 +31,7 @@ class ChatStore:
         
         Note: This returns raw ChatMessage-like dicts.
         """
-        # We search the chat_message_vectors table which is joined with chat_messages
-        # However, our shared retriever assumes a simple join. 
-        # In chat.py, the join structure is: chat_message_vectors v JOIN chat_messages m JOIN chat_sessions s
-        # The retriever might need to be more flexible or we write a specific query here.
-        
-        # Given the complexity of the chat join (needs session to get user_id),
-        # we might need to bypass the simple retriever or extend it.
-        # But wait, ChatMessage has user_id directly on it now?
-        # Let's check ap/models/chat.py.
-        # If ChatMessage has user_id, we can use the simple retriever.
-        
-        # Checking ... assuming ChatMessage has user_id based on previous file reads (line 80 in chat.py: user_id=user.user_id)
-        
-        results = await self._retriever.retrieve_by_similarity(
+        return await self._retriever.retrieve_by_similarity(
             query=query,
             user_id=user_id,
             table_name="chat_messages",
@@ -47,5 +39,54 @@ class ChatStore:
             id_column="id",
             limit=limit
         )
-        
-        return results
+
+    async def create_session(self, user_id: str, title: str) -> int:
+        async with self._session_factory() as session:
+            new_session = ChatSession(user_id=user_id, title=title)
+            session.add(new_session)
+            await session.commit()
+            return new_session.id
+
+    async def get_or_create_recent_session(self, user_id: str, title_hint: str) -> int:
+        """Get the most recent session or create a new one if none exists or too old."""
+        async with self._session_factory() as session:
+            stmt = select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.updated_at.desc()).limit(1)
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                return existing.id
+            
+            new_session = ChatSession(user_id=user_id, title=title_hint[:30])
+            session.add(new_session)
+            await session.commit()
+            return new_session.id
+
+    async def save_message(self, session_id: int, user_id: str, role: str, content: str) -> int:
+        """Save a message and its embedding."""
+        try:
+            # Generate embedding
+            doc_text = f"search_document: {content}"
+            embedding = embedding_factory.get_embedding(doc_text)
+            embedding_json = json.dumps(embedding)
+            
+            async with self._session_factory() as session:
+                msg = ChatMessage(
+                    session_id=session_id,
+                    user_id=user_id,
+                    role=role,
+                    content=content
+                )
+                session.add(msg)
+                await session.flush()
+                
+                # Insert vector
+                await session.execute(text("""
+                    INSERT INTO chat_message_vectors(id, embedding) VALUES (:id, :embedding)
+                """), {"id": msg.id, "embedding": embedding_json})
+                
+                await session.commit()
+                return msg.id
+        except Exception as e:
+            logger.error(f"Failed to save message: {e}")
+            raise e

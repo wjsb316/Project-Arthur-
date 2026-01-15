@@ -12,7 +12,7 @@ from .ingress.gateway import build_gateway_router
 from .ingress.streaming import build_streaming_router
 from .ingress.professional import build_professional_router
 from .ingress.auth import build_auth_router
-from .ingress.chat import router as chat_router
+from .ingress.chat import build_chat_router
 from .ingress.agents import build_agents_router
 from .ingress.memories import router as memories_router
 from .logging_config import configure_logging
@@ -94,7 +94,7 @@ def create_app(
     application.include_router(build_streaming_router(provider, memory, personal, audit))
     application.include_router(build_professional_router(permission_repository))
     application.include_router(build_auth_router()) # No repo arg needed, uses dependency
-    application.include_router(chat_router)
+    application.include_router(build_chat_router(provider, memory, personal, audit))
     application.include_router(build_agents_router())
     application.include_router(memories_router)
 
