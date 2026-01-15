@@ -23,4 +23,4 @@ class Memory(Base):
 
     # Note: Vector data will likely be stored in a parallel 'vec0' virtual table
     # or we handle it via raw SQL queries joining on 'id'.
-    # sqlite-vec usually works best with a rowid linkage.
+    # sqlite-vec usually works best with a rowid linkage - "id".

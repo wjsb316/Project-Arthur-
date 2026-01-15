@@ -13,6 +13,9 @@ class FrontendAccessMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         # Allow static files and root (frontend assets)
         path = request.url.path
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         if (
             path == "/"
             or path.startswith("/assets")

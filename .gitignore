@@ -11,3 +11,4 @@ __pycache__/
 .cursorrules*
 .cursorignore*
 .cursorignore*
+*.db

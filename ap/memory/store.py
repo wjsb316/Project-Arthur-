@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import logging
 import time
-import struct
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Iterable, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, text
-from sqlalchemy.orm import selectinload
 
 from ..models.memory import Memory
+from ..utils.embedding_factory import embedding_factory
 
 logger = logging.getLogger("arthur.ap.memory")
 
@@ -55,13 +54,19 @@ class MemoryStore:
             await session.commit()
             await session.refresh(memory)
             
-            # TODO: Generate embedding and insert into vec0 table
-            # embedding = await embedding_model.embed(content)
-            # await session.execute(
-            #     text("INSERT INTO memory_vectors(id, embedding) VALUES (:id, :embedding)"),
-            #     {"id": memory.id, "embedding": serialize_float32(embedding)}
-            # )
-            # await session.commit()
+            try:
+                # Generate embedding and insert into vec0 table
+                embedding = embedding_factory.get_embedding(content)
+                embedding_json = json.dumps(embedding)
+                
+                await session.execute(
+                    text("INSERT INTO memory_vectors(id, embedding) VALUES (:id, :embedding)"),
+                    {"id": memory.id, "embedding": embedding_json}
+                )
+                await session.commit()
+            except Exception as e:
+                logger.error(f"Failed to store memory vector: {e}")
+                # We don't fail the whole operation if vector storage fails, but we log it.
             
             return memory.id
 
@@ -79,11 +84,12 @@ class MemoryStore:
             stmt = delete(Memory).where(Memory.id == entry_id, Memory.user_id == user_id)
             result = await session.execute(stmt)
             
-            # Also delete from vector table
-            await session.execute(
-                text("DELETE FROM memory_vectors WHERE id = :id"),
-                {"id": entry_id}
-            )
+            if result.rowcount > 0:
+                # Also delete from vector table
+                await session.execute(
+                    text("DELETE FROM memory_vectors WHERE id = :id"),
+                    {"id": entry_id}
+                )
             
             await session.commit()
             return result.rowcount > 0
@@ -93,37 +99,93 @@ class MemoryStore:
         
         Uses a hybrid approach:
         1. If embeddings available: Vector search (semantic)
-        2. Always: Recency/Decay/Keyword overlap (lexical)
+        2. Fallback/Hybrid: Recency/Decay/Keyword overlap (lexical)
         """
         now_ts = int(time.time())
         tokens = set(query.lower().split())
         
+        candidates = {}  # id -> (score, row)
+
         async with self._session_factory() as session:
-            # Note: Full vector search integration requires an embedding model in the loop.
-            # For now, we rely on the lexical heuristic, but prepare the SQL path.
-            
-            # Example Vector Query (commented out until embedding model connected):
-            # vector_candidates = await session.execute(
-            #     text("SELECT id, distance FROM memory_vectors WHERE embedding MATCH :query_vec AND k = 20"),
-            #     {"query_vec": ...}
-            # )
-            
-            # Fallback / Baseline: Recency-biased fetch
+            # 1. Vector Search
+            try:
+                query_embedding = embedding_factory.get_embedding(query)
+                query_embedding_json = json.dumps(query_embedding)
+                
+                # Fetch top vector matches
+                vector_result = await session.execute(
+                    text("""
+                        SELECT m.id, vec_distance_cosine(v.embedding, :embedding) as distance
+                        FROM memory_vectors v
+                        JOIN memory_entries m ON v.id = m.id
+                        WHERE m.user_id = :user_id
+                        ORDER BY distance ASC
+                        LIMIT :limit
+                    """),
+                    {"embedding": query_embedding_json, "user_id": user_id, "limit": limit * 2}
+                )
+                
+                for row in vector_result:
+                    # distance is cosine distance (0-2), lower is better. 
+                    # Convert to similarity-ish score for combining.
+                    # 0 distance = 1.0 similarity. 
+                    similarity = max(0, 1 - row.distance)
+                    candidates[row.id] = {"vector_score": similarity, "id": row.id}
+                    
+            except Exception as e:
+                logger.error(f"Vector retrieval failed: {e}")
+
+            # 2. Lexical / Recency Search (Baseline)
+            # Fetch recent memories to mix in
             stmt = select(Memory).where(Memory.user_id == user_id).order_by(Memory.last_accessed.desc()).limit(100)
             result = await session.execute(stmt)
             rows = result.scalars().all()
+            
+            # Index rows by ID for easy access
+            memory_map = {row.id: row for row in rows}
+            
+            # Also fetch any missing rows from vector candidates
+            missing_ids = [mid for mid in candidates.keys() if mid not in memory_map]
+            if missing_ids:
+                stmt_missing = select(Memory).where(Memory.id.in_(missing_ids))
+                result_missing = await session.execute(stmt_missing)
+                for row in result_missing.scalars():
+                    memory_map[row.id] = row
 
+        # Scoring Logic
         scored = []
-        for row in rows:
-            # Basic ranking logic logic port
+        for mem_id, row in memory_map.items():
+            # Base components
             row_last_access = row.last_accessed.timestamp()
             age_hours = max(0.0, (now_ts - row_last_access) / 3600)
             recency_weight = 1 / (1 + age_hours)
             decay_weight = pow(2.71828, -row.decay_rate * age_hours)
+            
+            # Lexical overlap
             content_tokens = set(row.content.lower().split())
             overlap = len(tokens & content_tokens)
-            score = (row.importance + overlap) * recency_weight * decay_weight
-            scored.append((score, row))
+            lexical_score = (row.importance + overlap)
+            
+            # Vector score
+            vector_score = candidates.get(mem_id, {}).get("vector_score", 0.0)
+            
+            # Combined Score
+            # If we have a high vector match, it should boost significantly.
+            # If no vector match, we rely on lexical * recency.
+            
+            # Hybrid formula:
+            # score = (Lexical * 0.3 + Vector * 0.7) * Recency * Decay
+            # Normalize lexical roughly (assuming 0-5 overlap typically)
+            norm_lexical = min(lexical_score / 5.0, 1.0)
+            
+            if vector_score > 0:
+                combined_relevance = (norm_lexical * 0.3) + (vector_score * 0.7)
+            else:
+                combined_relevance = norm_lexical
+                
+            final_score = combined_relevance * recency_weight * decay_weight
+            
+            scored.append((final_score, row))
 
         scored.sort(key=lambda item: item[0], reverse=True)
         selected = [row for _, row in scored[:limit] if _ > 0]

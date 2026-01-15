@@ -40,6 +40,13 @@ const IconAgents = () => (
   </svg>
 );
 
+const IconBrain = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"></path>
+    <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"></path>
+  </svg>
+);
+
 const IconSettings = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3"></circle>
@@ -56,11 +63,17 @@ const IconCat = () => (
 
 function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'history' | 'agents' | 'settings'>('login');
+  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'history' | 'agents' | 'memories' | 'settings'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Memories State
+  const [memories, setMemories] = useState<Array<{id: number, content: string, kind: string, created_at: string}>>([]);
+  const [newMemoryContent, setNewMemoryContent] = useState('');
+  const [isCreatingMemory, setIsCreatingMemory] = useState(false);
+  const [memorySearch, setMemorySearch] = useState('');
 
   // Agents State
   const [agents, setAgents] = useState<Array<{id: number, name: string, prompt: string, created_at?: string}>>([]);
@@ -94,6 +107,7 @@ function App() {
   const [chatHistory, setChatHistory] = useState<Array<{role: string, content: string}>>([]);
   const [fullHistory, setFullHistory] = useState<Array<any>>([]);
   const [selectedSessions, setSelectedSessions] = useState<number[]>([]);
+  const [historySearch, setHistorySearch] = useState('');
   const [nukeProgress, setNukeProgress] = useState(0);
   const nukeTimerRef = useRef<number | null>(null);
 
@@ -104,7 +118,65 @@ function App() {
     if (view === 'agents' && token) {
         fetchAgents();
     }
+    if (view === 'memories' && token) {
+        fetchMemories();
+    }
   }, [view, token]);
+
+  const fetchMemories = (query = '') => {
+    let url = '/api/memories/';
+    if (query) url += `?query=${encodeURIComponent(query)}`;
+    
+    fetch(url, {
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            ...API_HEADERS
+        }
+    })
+    .then(res => res.json())
+    .then(data => setMemories(data))
+    .catch(console.error);
+  };
+
+  const handleCreateMemory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMemoryContent.trim()) return;
+
+    try {
+        const res = await fetch('/api/memories/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                ...API_HEADERS
+            },
+            body: JSON.stringify({ content: newMemoryContent, kind: 'fact' })
+        });
+        if (res.ok) {
+            setNewMemoryContent('');
+            setIsCreatingMemory(false);
+            fetchMemories();
+        }
+    } catch (e) {
+        console.error(e);
+    }
+  };
+
+  const handleDeleteMemory = async (id: number) => {
+      if(!confirm("Forget this memory?")) return;
+      try {
+          const res = await fetch(`/api/memories/${id}`, {
+              method: 'DELETE',
+              headers: {
+                  'Authorization': `Bearer ${token}`,
+                  ...API_HEADERS
+              }
+          });
+          if (res.ok) fetchMemories(memorySearch);
+      } catch (e) {
+          console.error(e);
+      }
+  };
 
   const fetchAgents = () => {
     // The router prefix is /api/agents
@@ -174,6 +246,20 @@ function App() {
         })
         .catch(console.error);
   }
+  
+  const filteredHistory = fullHistory.filter((session: any) => {
+    if (!historySearch.trim()) return true;
+    const term = historySearch.toLowerCase();
+    
+    // Check session ID
+    if (session.id.toString().includes(term)) return true;
+    
+    // Check messages
+    return session.messages.some((msg: any) => 
+        msg.content.toLowerCase().includes(term) || 
+        msg.role.toLowerCase().includes(term)
+    );
+  });
 
   const toggleSession = (id: number) => {
       setSelectedSessions(prev => 
@@ -347,7 +433,7 @@ function App() {
       }
   }
 
-  if (['dashboard', 'history', 'agents', 'settings'].includes(view)) {
+  if (['dashboard', 'history', 'agents', 'memories', 'settings'].includes(view)) {
     return (
       <div className="app-layout">
         <header className="mobile-header">
@@ -387,6 +473,16 @@ function App() {
                 >
                     <IconHistory />
                     <span>Chat History</span>
+                </button>
+                <button 
+                    className={`nav-item ${view === 'memories' ? 'active' : ''}`}
+                    onClick={() => {
+                        setView('memories');
+                        setIsSidebarOpen(false);
+                    }}
+                >
+                    <IconBrain />
+                    <span>Memories</span>
                 </button>
                 <button 
                     className={`nav-item ${view === 'agents' ? 'active' : ''}`}
@@ -481,8 +577,18 @@ function App() {
                         </button>
                     </div>
 
+                    <div style={{ marginBottom: '2rem' }}>
+                        <input 
+                            type="text" 
+                            value={historySearch}
+                            onChange={(e) => setHistorySearch(e.target.value)}
+                            placeholder="Search history..."
+                            style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                        />
+                    </div>
+
                     <div className="history-list" style={{ flex: 1, overflowY: 'auto' }}>
-                        {fullHistory.map((session: any) => (
+                        {filteredHistory.map((session: any) => (
                             <div key={session.id} style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', alignItems: 'flex-start' }}>
                                 <input 
                                     type="checkbox" 
@@ -530,6 +636,88 @@ function App() {
                             {nukeProgress > 0 ? `HOLD TO NUKE... ${nukeProgress}%` : 'NUKE HISTORY'}
                         </button>
                         <p style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.5rem' }}>Press and hold to delete all history</p>
+                    </div>
+                </div>
+            )}
+
+            {view === 'memories' && (
+                <div className="memories-view" style={{ padding: '2rem', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                        <h2>Memories</h2>
+                        <button 
+                            onClick={() => setIsCreatingMemory(!isCreatingMemory)}
+                            className="primary-btn"
+                            style={{ 
+                              width: 'auto',
+                              padding: '.5rem'
+                             }}
+                        >
+                            {isCreatingMemory ? 'Cancel' : 'Add Memory'}
+                        </button>
+                    </div>
+
+                    <div style={{ marginBottom: '2rem' }}>
+                        <input 
+                            type="text" 
+                            value={memorySearch}
+                            onChange={(e) => {
+                                setMemorySearch(e.target.value);
+                                fetchMemories(e.target.value);
+                            }}
+                            placeholder="Search memories..."
+                            style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                        />
+                    </div>
+
+                    {isCreatingMemory && (
+                        <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '2rem' }}>
+                            <h3>New Memory</h3>
+                            <form onSubmit={handleCreateMemory}>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Content</label>
+                                    <textarea 
+                                        value={newMemoryContent} 
+                                        onChange={e => setNewMemoryContent(e.target.value)} 
+                                        placeholder="I like coffee with oat milk..."
+                                        style={{ 
+                                            width: '100%', 
+                                            padding: '0.5rem', 
+                                            borderRadius: '4px', 
+                                            border: '1px solid #cbd5e1', 
+                                            minHeight: '100px',
+                                            fontFamily: 'inherit'
+                                        }}
+                                        required
+                                    />
+                                </div>
+                                <button type="submit" className="primary-btn">Save Memory</button>
+                            </form>
+                        </div>
+                    )}
+
+                    <div className="memories-list" style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                        {memories.map(memory => (
+                            <div key={memory.id} style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', position: 'relative' }}>
+                                <button 
+                                    onClick={() => handleDeleteMemory(memory.id)}
+                                    style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                                    title="Forget"
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+                                    {new Date(memory.created_at).toLocaleDateString()} • {memory.kind}
+                                </div>
+                                <div style={{ fontSize: '0.9rem', color: '#64748b', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto' }}>
+                                    {memory.content}
+                                </div>
+                            </div>
+                        ))}
+                        {memories.length === 0 && !isCreatingMemory && (
+                            <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>
+                                No memories found.
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -614,7 +802,7 @@ function App() {
                 </div>
             )}
             
-            {view !== 'dashboard' && view !== 'history' && view !== 'agents' && (
+            {view !== 'dashboard' && view !== 'history' && view !== 'agents' && view !== 'memories' && (
                 <div className="content-placeholder">
                     <h2>{view.charAt(0).toUpperCase() + view.slice(1)}</h2>
                     <p>This section is under construction.</p>
