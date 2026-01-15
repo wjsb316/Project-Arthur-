@@ -5,13 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, text
+from sqlalchemy import select
 from pydantic import BaseModel
 from datetime import timedelta
 
 from ..database import get_db
 from ..models.users import User
-from ..models.chat import ChatSession, ChatMessage
 from ..security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     ALGORITHM,
@@ -138,35 +137,11 @@ def build_auth_router() -> APIRouter:
                 detail=f"Registration failed: {str(e)}"
             )
 
-    @router.get("/users/me", response_model=UserResponse)
-    async def read_users_me(
-        current_user: Annotated[User, Depends(get_current_user)],
-    ):
-        return UserResponse(
-            user_id=current_user.user_id,
-            username=current_user.username,
-            created_at=str(current_user.created_at)
-        )
-
     @router.delete("/users/me")
     async def delete_me(
         current_user: Annotated[User, Depends(get_current_user)],
         session: Annotated[AsyncSession, Depends(get_db)],
     ):
-        # 1. Clean up vectors
-        stmt_msgs = select(ChatMessage.id).join(ChatSession).where(ChatSession.user_id == current_user.user_id)
-        result_msgs = await session.execute(stmt_msgs)
-        msg_ids = result_msgs.scalars().all()
-        
-        if msg_ids:
-             for m_id in msg_ids:
-                 await session.execute(text("DELETE FROM chat_message_vectors WHERE id = :id"), {"id": m_id})
-
-        # 2. Delete chat history (sessions -> messages)
-        chat_stmt = delete(ChatSession).where(ChatSession.user_id == current_user.user_id)
-        await session.execute(chat_stmt)
-
-        # 3. Delete user
         await session.delete(current_user)
         await session.commit()
         return {"msg": "User deleted"}

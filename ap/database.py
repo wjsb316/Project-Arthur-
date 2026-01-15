@@ -51,7 +51,6 @@ def get_engine():
                     # .driver_connection -> aiosqlite.core.Connection
                     # ._conn -> sqlite3.Connection
                     conn = dbapi_conn.driver_connection._conn
-                    conn.execute("PRAGMA foreign_keys=ON")
                     conn.enable_load_extension(True)
                     sqlite_vec.load(conn)
                     conn.enable_load_extension(False)
@@ -90,7 +89,7 @@ async def init_db():
             await conn.execute(text("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0(
                     id INTEGER PRIMARY KEY,
-                    embedding float[256]
+                    embedding float[384]
                 );
             """))
             await conn.execute(text("""
