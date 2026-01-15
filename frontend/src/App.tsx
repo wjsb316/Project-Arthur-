@@ -72,6 +72,7 @@ function App() {
   // Memories State
   const [memories, setMemories] = useState<Array<{id: number, content: string, kind: string, created_at: string}>>([]);
   const [newMemoryContent, setNewMemoryContent] = useState('');
+  const [newMemoryKind, setNewMemoryKind] = useState('fact');
   const [isCreatingMemory, setIsCreatingMemory] = useState(false);
   const [memorySearch, setMemorySearch] = useState('');
 
@@ -150,10 +151,11 @@ function App() {
                 'Authorization': `Bearer ${token}`,
                 ...API_HEADERS
             },
-            body: JSON.stringify({ content: newMemoryContent, kind: 'fact' })
+            body: JSON.stringify({ content: newMemoryContent, kind: newMemoryKind })
         });
         if (res.ok) {
             setNewMemoryContent('');
+            setNewMemoryKind('fact');
             setIsCreatingMemory(false);
             fetchMemories();
         }
@@ -674,6 +676,26 @@ function App() {
                             <h3>New Memory</h3>
                             <form onSubmit={handleCreateMemory}>
                                 <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Type</label>
+                                    <select
+                                        value={newMemoryKind}
+                                        onChange={e => setNewMemoryKind(e.target.value)}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.5rem',
+                                            borderRadius: '4px',
+                                            border: '1px solid #cbd5e1',
+                                            background: 'white',
+                                            color: '#1e293b',
+                                            marginBottom: '1rem'
+                                        }}
+                                    >
+                                        <option value="fact">Fact</option>
+                                        <option value="episode">Episode</option>
+                                        <option value="open_loop">Open Loop</option>
+                                    </select>
+                                </div>
+                                <div className="form-group">
                                     <label style={{ color: '#1e293b' }}>Content</label>
                                     <textarea 
                                         value={newMemoryContent} 
@@ -805,7 +827,6 @@ function App() {
             {view !== 'dashboard' && view !== 'history' && view !== 'agents' && view !== 'memories' && (
                 <div className="content-placeholder">
                     <h2>{view.charAt(0).toUpperCase() + view.slice(1)}</h2>
-                    <p>This section is under construction.</p>
                     {view === 'settings' && (
                          <button onClick={handleDeleteAccount} className="danger-btn">Delete Account</button>
                     )}

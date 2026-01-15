@@ -106,37 +106,36 @@ class MemoryStore:
         
         candidates = {}  # id -> (score, row)
 
-        async with self._session_factory() as session:
-            # 1. Vector Search
-            try:
-                query_embedding = embedding_factory.get_embedding(query)
-                query_embedding_json = json.dumps(query_embedding)
+        # 1. Vector Search using shared retriever
+        try:
+            from ..persistence.retrieval import VectorRetriever
+            retriever = VectorRetriever(self._session_factory)
+            
+            vector_results = await retriever.retrieve_by_similarity(
+                query=query,
+                user_id=user_id,
+                table_name="memory_entries",
+                vector_table_name="memory_vectors",
+                limit=limit * 2
+            )
+            
+            for row_dict in vector_results:
+                # Retrieve raw row if possible, or use the dict
+                # The shared retriever returns dicts, but we need Memory objects for downstream hybrid logic.
+                # However, since we are doing a hybrid mix, we might need to fetch the objects anyway 
+                # or just use the IDs to boost scores.
                 
-                # Fetch top vector matches
-                vector_result = await session.execute(
-                    text("""
-                        SELECT m.id, vec_distance_cosine(v.embedding, :embedding) as distance
-                        FROM memory_vectors v
-                        JOIN memory_entries m ON v.id = m.id
-                        WHERE m.user_id = :user_id
-                        ORDER BY distance ASC
-                        LIMIT :limit
-                    """),
-                    {"embedding": query_embedding_json, "user_id": user_id, "limit": limit * 2}
-                )
+                # distance is cosine distance (0-2). 0 = perfect match.
+                similarity = max(0, 1 - row_dict['distance'])
+                candidates[row_dict['id']] = {"vector_score": similarity, "id": row_dict['id']}
                 
-                for row in vector_result:
-                    # distance is cosine distance (0-2), lower is better. 
-                    # Convert to similarity-ish score for combining.
-                    # 0 distance = 1.0 similarity. 
-                    similarity = max(0, 1 - row.distance)
-                    candidates[row.id] = {"vector_score": similarity, "id": row.id}
-                    
-            except Exception as e:
-                logger.error(f"Vector retrieval failed: {e}")
+        except Exception as e:
+            logger.error(f"Vector retrieval failed: {e}")
 
+        async with self._session_factory() as session:
             # 2. Lexical / Recency Search (Baseline)
             # Fetch recent memories to mix in
+
             stmt = select(Memory).where(Memory.user_id == user_id).order_by(Memory.last_accessed.desc()).limit(100)
             result = await session.execute(stmt)
             rows = result.scalars().all()

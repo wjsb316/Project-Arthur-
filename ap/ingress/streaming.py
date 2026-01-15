@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict, Annotated
+from typing import Any, Dict
 
 from fastapi import APIRouter, Body, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
@@ -16,142 +12,18 @@ from jsonschema import ValidationError
 
 from ..protocol.validator import validate_message
 from ..models import ModelProvider, ProviderHealth
-from ..memory import MemoryStore, MemoryEntry
+from ..memory import MemoryStore
+from ..persistence.chat import ChatStore
+from ..agent.graph import build_agent_graph, StreamManager
 from ..personal_brain import PersonalBrain
 from ..persistence.audit import AuditLog
 from ..models.users import User as UserRecord
 from .auth import get_current_user
+from ..database import get_session_maker
 
 MAX_UTTERANCE_LENGTH = 2048
-STREAM_DELAY_SECONDS = 0.01
 
 logger = logging.getLogger("arthur.ap.streaming")
-
-
-class StreamManager:
-    """Tracks active streams and cancellation signals."""
-
-    def __init__(self, provider: ModelProvider) -> None:
-        self._cancellations: dict[str, asyncio.Event] = {}
-        self._provider = provider
-
-    def register(self, stream_id: str) -> asyncio.Event:
-        """Register a new stream and return its cancellation event."""
-        event = asyncio.Event()
-        self._cancellations[stream_id] = event
-        return event
-
-    async def cancel(self, stream_id: str) -> bool:
-        """Cancel an active stream by ID. Returns True if found."""
-        event = self._cancellations.get(stream_id)
-        if event:
-            event.set()
-            await self._provider.cancel(stream_id)
-            return True
-        return False
-
-    def cleanup(self, stream_id: str) -> None:
-        """Remove a stream from tracking."""
-        self._cancellations.pop(stream_id, None)
-
-
-@dataclass
-class StreamState:
-    """Context for an active assistant response stream."""
-    stream_id: str
-    trace_id: str | None
-    text: str
-
-
-async def _assistant_stream(
-    state: StreamState,
-    cancel_event: asyncio.Event,
-    manager: StreamManager,
-    provider: ModelProvider,
-    personal_brain: PersonalBrain,
-    audit_log: AuditLog,
-) -> AsyncGenerator[str, None]:
-    """Orchestrates the streaming response generation.
-    
-    1. Streams raw tokens from the provider.
-    2. Wraps tokens in protocol messages (assistant_delta).
-    3. Accumulates text for final tone analysis.
-    4. Emits a final completion message (assistant_final).
-    """
-    start_time = time.perf_counter()
-    tokens: list[str] = []
-    try:
-        async for index, token in _enumerate_provider_stream(
-            provider.stream(state.stream_id, state.text, cancel_event), cancel_event
-        ):
-            if cancel_event.is_set():
-                break
-            tokens.append(token)
-            delta = {
-                "id": state.stream_id,
-                "type": "tool",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "stream": True,
-                "delta_index": index,
-                "payload": {
-                    "name": "assistant_delta",
-                    "args": {
-                        "text": token,
-                        "confidence": 0.5,
-                        "model_health": "ok",
-                        "trace_id": state.trace_id,
-                    },
-                },
-            }
-            validate_message(delta)
-            yield json.dumps(delta) + "\n"
-
-        if cancel_event.is_set():
-            return
-
-        final_text = "".join(tokens) if tokens else state.text
-        toned_text = personal_brain.apply_tone(final_text)
-        confidence, model_health = await _build_confidence_and_health(provider)
-        final = {
-            "id": state.stream_id,
-            "type": "tool",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "stream": True,
-            "complete": True,
-            "payload": {
-                "name": "assistant_final",
-                "args": {
-                    "text": toned_text,
-                    "confidence": confidence,
-                    "model_health": model_health,
-                    "trace_id": state.trace_id,
-                },
-            },
-        }
-        validate_message(final)
-        yield json.dumps(final) + "\n"
-    finally:
-        latency_ms = (time.perf_counter() - start_time) * 1000
-        logger.info(
-            "assistant_stream_latency_ms",
-            extra={
-                "event": "assistant_stream_latency",
-                "stream_id": state.stream_id,
-                "latency_ms": round(latency_ms, 2),
-            },
-        )
-        manager.cleanup(state.stream_id)
-
-
-async def _enumerate_provider_stream(
-    generator: AsyncGenerator[str, None], cancel_event: asyncio.Event
-) -> AsyncGenerator[tuple[int, str], None]:
-    index = 0
-    async for token in generator:
-        yield index, token
-        index += 1
-        if cancel_event.is_set():
-            break
 
 
 def _ensure_provider_ready(health: ProviderHealth, audit_log: AuditLog, trace_id: str | None) -> None:
@@ -179,40 +51,6 @@ def _ensure_provider_ready(health: ProviderHealth, audit_log: AuditLog, trace_id
         )
 
 
-def _compact_context(entries: list[MemoryEntry]) -> str:
-    if not entries:
-        return ""
-    snippets = [f"- ({entry.kind}) {entry.content}" for entry in entries]
-    return "Context:\n" + "\n".join(snippets) + "\n"
-
-
-def _clamp_score(value: float) -> float:
-    return max(0.0, min(1.0, value))
-
-
-def _confidence_level(score: float) -> str:
-    if score >= 0.66:
-        return "high"
-    if score >= 0.33:
-        return "medium"
-    return "low"
-
-
-async def _build_confidence_and_health(provider: ModelProvider) -> tuple[dict[str, Any], dict[str, Any]]:
-    health = await provider.health_check()
-    latency_ms = health.latency_ms or 0.0
-    base_score = 0.9 if health.status == "ok" else 0.3
-    adjusted = base_score - min(latency_ms, 1500) / 3000
-    score = _clamp_score(adjusted)
-    confidence = {"score": score, "level": _confidence_level(score)}
-    model_health = {
-        "provider": provider.__class__.__name__,
-        "status": health.status,
-        "metrics": health.metrics or {"latency_ms": latency_ms},
-    }
-    return confidence, model_health
-
-
 def build_streaming_router(
     provider: ModelProvider,
     memory_store: MemoryStore,
@@ -222,6 +60,18 @@ def build_streaming_router(
     """Build and configure the streaming ingress router."""
     router = APIRouter(prefix="/stream/v1")
     manager = StreamManager(provider)
+    
+    session_factory = get_session_maker()
+    chat_store = ChatStore(session_factory)
+    
+    agent_graph = build_agent_graph(
+        memory_store, 
+        chat_store,
+        provider,
+        personal_brain,
+        audit_log,
+        manager
+    )
 
     @router.post("/user-utterance")
     async def user_utterance(
@@ -233,7 +83,7 @@ def build_streaming_router(
         Process:
         1. Validate schema and payload.
         2. Check model provider health.
-        3. Retrieve relevant memory context (scoped to user).
+        3. Use LangGraph agent to retrieve memory & chat history context.
         4. Store user input in short-term memory (scoped to user).
         5. Stream response via Server-Sent Events (SSE) logic over JSON-lines.
         """
@@ -268,11 +118,22 @@ def build_streaming_router(
 
         _ensure_provider_ready(await provider.health_check(), audit_log, trace_id)
 
-        # Multi-tenancy: Pass user_id to memory store
-        retrieved = memory_store.retrieve_relevant(text, current_user.user_id, limit=5)
-        context = _compact_context(retrieved)
-        prompt_text = f"{context}User: {text}" if context else text
+        # Execute LangGraph for Context Retrieval and Generation Setup
+        initial_state = {
+            "user_input": text,
+            "user_id": current_user.user_id,
+            "trace_id": trace_id,
+            "stream_id": message["id"],
+            "memories": [],
+            "chat_history": [],
+            "agents": [],
+            "final_prompt": "",
+            "response_generator": None
+        }
         
+        final_state = await agent_graph.ainvoke(initial_state)
+        
+        # Store open loop (fire and forget / async)
         await memory_store.store_open_loop(text, current_user.user_id)
 
         audit_log.append(
@@ -282,9 +143,11 @@ def build_streaming_router(
             details={"stream_id": message["id"], "user_id": current_user.user_id},
         )
 
-        state = StreamState(stream_id=message["id"], trace_id=trace_id, text=prompt_text)
-        cancel_event = manager.register(state.stream_id)
-        generator = _assistant_stream(state, cancel_event, manager, provider, personal_brain, audit_log)
+        generator = final_state.get("response_generator")
+        if not generator:
+             logger.error("Graph did not return a response generator")
+             raise HTTPException(status_code=500, detail="Internal processing error")
+
         return StreamingResponse(generator, media_type="application/json")
 
     @router.post("/interrupt")
