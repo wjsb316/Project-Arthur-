@@ -47,6 +47,17 @@ class ChatStore:
             await session.commit()
             return new_session.id
 
+    async def verify_and_get_session(self, session_id: int, user_id: str) -> int | None:
+        """Verify a session belongs to the user and return its ID if valid."""
+        async with self._session_factory() as session:
+            stmt = select(ChatSession).where(
+                ChatSession.id == session_id,
+                ChatSession.user_id == user_id
+            )
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            return existing.id if existing else None
+
     async def get_or_create_recent_session(self, user_id: str, title_hint: str) -> int:
         """Get the most recent session or create a new one if none exists or too old."""
         async with self._session_factory() as session:

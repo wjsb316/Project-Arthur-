@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, delete, select
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from ..database import get_db, get_session_maker
 from ..models.chat import ChatSession, ChatMessage
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 class ChatRequest(BaseModel):
     text: str
     new_session: bool = False
+    session_id: Optional[int] = None  # Allows continuing a specific session
 
 class DeleteSessionsRequest(BaseModel):
     session_ids: list[int]
@@ -61,7 +62,15 @@ def build_chat_router(
         session_id = None
         user_msg_id = None
         try:
-            if request.new_session:
+            if request.session_id:
+                # Continuing a specific session - verify it belongs to this user
+                session_id = await chat_store.verify_and_get_session(
+                    request.session_id,
+                    user.user_id
+                )
+                if not session_id:
+                    raise HTTPException(status_code=404, detail="Session not found")
+            elif request.new_session:
                 session_id = await chat_store.create_session(
                     user.user_id,
                     title=text_input[:30]

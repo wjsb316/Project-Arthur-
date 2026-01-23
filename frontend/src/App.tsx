@@ -120,7 +120,8 @@ function App() {
   const [nukeProgress, setNukeProgress] = useState(0);
   const nukeTimerRef = useRef<number | null>(null);
   
-  const [isNewSession, setIsNewSession] = useState(false);
+  const [isNewSession, setIsNewSession] = useState(true);
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -354,7 +355,20 @@ function App() {
   const handleNewChat = () => {
       setChatHistory([]);
       setIsNewSession(true);
+      setCurrentSessionId(null);
       if (view !== 'dashboard') setView('dashboard');
+  };
+
+  const loadSession = (session: any) => {
+      // Load the session's messages into the chat window
+      const messages = session.messages.map((msg: any) => ({
+          role: msg.role,
+          content: msg.content
+      }));
+      setChatHistory(messages);
+      setCurrentSessionId(session.id);
+      setIsNewSession(false);  // We're continuing an existing session
+      setView('dashboard');
   };
 
   const handleChatSubmit = async (e: React.FormEvent) => {
@@ -366,10 +380,15 @@ function App() {
     setChatInput('');
 
     try {
-        const payload = { 
+        const payload: { text: string; new_session: boolean; session_id?: number } = { 
             text: userMessage.content,
             new_session: isNewSession
         };
+        
+        // If we're continuing a specific session, include the session_id
+        if (currentSessionId && !isNewSession) {
+            payload.session_id = currentSessionId;
+        }
         
         // Reset the flag immediately so subsequent messages in this session aren't treated as new
         if (isNewSession) setIsNewSession(false);
@@ -386,6 +405,10 @@ function App() {
         
         if (res.ok) {
             const data = await res.json();
+            // Capture the session_id so subsequent messages go to the same session
+            if (data.session_id && !currentSessionId) {
+                setCurrentSessionId(data.session_id);
+            }
             if (data.response) {
                 setChatHistory(prev => [...prev, { role: 'Arthur', content: data.response.content }]);
             }
@@ -655,8 +678,25 @@ function App() {
                                     style={{ marginTop: '1rem', width: '20px', height: '20px' }}
                                 />
                                 <div style={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '8px', padding: '1rem', background: 'white' }}>
-                                    <div style={{ borderBottom: '1px solid #eee', paddingBottom: '0.5rem', marginBottom: '1rem', color: '#64748b', fontSize: '0.9rem' }}>
-                                        Session {session.id} • {session.created_at}
+                                    <div style={{ borderBottom: '1px solid #eee', paddingBottom: '0.5rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ color: '#64748b', fontSize: '0.9rem' }}>
+                                            Session {session.id} • {session.created_at}
+                                        </span>
+                                        <button
+                                            onClick={() => loadSession(session)}
+                                            style={{
+                                                background: '#3b82f6',
+                                                color: 'white',
+                                                border: 'none',
+                                                padding: '0.25rem 0.75rem',
+                                                borderRadius: '4px',
+                                                fontSize: '0.8rem',
+                                                fontWeight: '500',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Continue
+                                        </button>
                                     </div>
                                     {session.messages.map((msg: any, i: number) => (
                                         <div key={i} style={{ marginBottom: '0.5rem', fontFamily: 'monospace', fontSize: '0.9rem' }}>
