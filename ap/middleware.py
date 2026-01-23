@@ -28,6 +28,9 @@ class FrontendAccessMiddleware(BaseHTTPMiddleware):
             or path.endswith(".woff")
             or path.endswith(".woff2")
             or path == "/health" # Keep health check accessible
+            or path == "/docs"
+            or path == "/redoc"
+            or path == "/openapi.json"
         ):
             return await call_next(request)
 

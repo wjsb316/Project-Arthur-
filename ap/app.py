@@ -67,10 +67,17 @@ def create_app(
     professional_gate = ProfessionalBrainGate(permission_repository)
     personal = personal_brain or PersonalBrain(professional_gate=professional_gate)
 
+    # application = FastAPI(
+    #     title=settings.app_name,
+    #     docs_url=None,  # Disable Swagger UI
+    #     redoc_url=None,  # Disable ReDoc
+    #     lifespan=lifespan,
+    # )
+
     application = FastAPI(
         title=settings.app_name,
-        docs_url=None,  # Disable Swagger UI
-        redoc_url=None,  # Disable ReDoc
+        docs_url='/docs',  
+        redoc_url='/redoc',
         lifespan=lifespan,
     )
 
@@ -127,8 +134,8 @@ def create_app(
         # Catch-all for SPA
         @application.get("/{full_path:path}")
         async def serve_spa(full_path: str):
-            # Allow API routes to pass through (though they should match earlier)
-            if full_path.startswith("api") or full_path.startswith("ws"):
+            # Allow API routes and docs to pass through (though they should match earlier)
+            if full_path.startswith("api") or full_path.startswith("ws") or full_path in ("docs", "redoc", "openapi.json"):
                  return {"status": "404", "message": "Not found"}
 
             file_path = static_dir / full_path

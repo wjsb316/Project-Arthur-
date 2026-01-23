@@ -147,7 +147,8 @@ async def _assistant_stream(
             return
 
         final_text = "".join(tokens) if tokens else state.text
-        toned_text = personal_brain.apply_tone(final_text)
+        # toned_text = personal_brain.apply_tone(final_text)
+        toned_text = final_text
 
         # Closed Loop: Save response to ChatStore
         if state.chat_store and state.session_id and state.user_id:
