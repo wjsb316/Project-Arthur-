@@ -684,15 +684,27 @@ function App() {
 
                     <div className="input-area">
                         <form onSubmit={handleChatSubmit} className="chat-input-wrapper">
-                            <input 
-                                type="text" 
+                            <textarea 
                                 value={chatInput} 
-                                onChange={(e) => setChatInput(e.target.value)} 
+                                onChange={(e) => {
+                                    setChatInput(e.target.value);
+                                    // Auto-resize textarea
+                                    e.target.style.height = 'auto';
+                                    e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+                                }} 
+                                onKeyDown={(e) => {
+                                    // Submit on Enter, new line on Shift+Enter
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleChatSubmit(e);
+                                    }
+                                }}
                                 placeholder="Type your message..." 
+                                rows={1}
                             />
-                            <button type="submit" className="send-btn">
-                                <Send size={20} />
-                            </button>
+                            {/* <button type="submit" className="send-btn"> */}
+                                <Send color="#000000" strokeWidth={1} className="send-btn"/>
+                            {/* </button> */}
                         </form>
                     </div>
                 </div>

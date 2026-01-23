@@ -260,7 +260,7 @@ body {
 
 .chat-input-wrapper {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     background-color: white;
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -268,13 +268,21 @@ body {
     box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
-.chat-input-wrapper input {
+.chat-input-wrapper textarea {
     flex: 1;
     border: none;
     outline: none;
     padding: 0.5rem 1rem;
     font-size: 1rem;
     color: var(--text-color);
+    resize: none;
+    min-height: 24px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: inherit;
+    line-height: 1.5;
+    word-wrap: break-word;
+    white-space: pre-wrap;
 }
 
 .send-btn {
@@ -289,12 +297,18 @@ body {
     color: #64748b;
     cursor: pointer;
     transition: all 0.2s;
+    position: relative;
+}
+
+.send-btn svg {
+    width: 15px;
+    height: 15px;
 }
 
 .send-btn:hover {
     background-color: var(--primary-color);
-    color: white;
 }
+
 
 /* Auth Cards Re-style to be decent */
 .auth-card {
