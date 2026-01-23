@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send } from 'lucide-react';
 import './App.css';
+import Antigravity from './Antigravity';
 
 const API_HEADERS = {
     'X-Arthur-Client': 'Arthur-Prime-V1'
@@ -62,6 +63,15 @@ const IconNewChat = () => (
   </svg>
 );
 
+const IconVoice = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+    <line x1="12" y1="19" x2="12" y2="23"></line>
+    <line x1="8" y1="23" x2="16" y2="23"></line>
+  </svg>
+);
+
 const IconCat = () => (
     <svg width="40" height="40" viewBox="0 0 24 24" fill="black" stroke="none">
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h2v2H7v-2zm8 0h2v2h-2v-2zm-4 4h4v2h-4v-2z"/>
@@ -71,7 +81,7 @@ const IconCat = () => (
 
 function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'history' | 'agents' | 'memories' | 'settings'>('login');
+  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'history' | 'agents' | 'memories' | 'settings' | 'voice'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -560,7 +570,7 @@ function App() {
       }
   }
 
-  if (['dashboard', 'history', 'agents', 'memories', 'settings'].includes(view)) {
+  if (['dashboard', 'history', 'agents', 'memories', 'settings', 'voice'].includes(view)) {
     return (
       <div className="app-layout">
         <header className="mobile-header">
@@ -581,6 +591,16 @@ function App() {
             </div>
 
             <nav className="sidebar-nav">
+                <button 
+                    className={`nav-item ${view === 'voice' ? 'active' : ''}`}
+                    onClick={() => {
+                        setView('voice');
+                        setIsSidebarOpen(false);
+                    }}
+                >
+                    <IconVoice />
+                    <span>Voice</span>
+                </button>
                 <button 
                     className={`nav-item ${view === 'dashboard' ? 'active' : ''}`}
                     onClick={() => {
@@ -645,6 +665,30 @@ function App() {
         </aside>
 
         <main className="main-content">
+            {view === 'voice' && (
+                <div className="voice-interface" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+                    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+                        <Antigravity
+                            count={1000}
+                            magnetRadius={21}
+                            ringRadius={5}
+                            waveSpeed={5}
+                            waveAmplitude={5}
+                            particleSize={1.3}
+                            lerpSpeed={0.02}
+                            color="#616375"
+                            autoAnimate={false}
+                            particleVariance={0.5}
+                            rotationSpeed={0.1}
+                            depthFactor={1}
+                            pulseSpeed={10}
+                            particleShape="sphere"
+                            fieldStrength={10}
+                        />
+                    </div>
+                </div>
+            )}
+
             {view === 'dashboard' && (
                 <div className="chat-interface">
                     <header className="chat-header">
@@ -1040,7 +1084,7 @@ function App() {
                 </div>
             )}
             
-            {view !== 'dashboard' && view !== 'history' && view !== 'agents' && view !== 'memories' && (
+            {view !== 'dashboard' && view !== 'history' && view !== 'agents' && view !== 'memories' && view !== 'voice' && (
                 <div className="content-placeholder">
                     <h2>{view.charAt(0).toUpperCase() + view.slice(1)}</h2>
                     {view === 'settings' && (
