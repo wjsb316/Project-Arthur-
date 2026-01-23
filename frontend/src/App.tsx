@@ -83,6 +83,9 @@ function App() {
   const [newMemoryKind, setNewMemoryKind] = useState('fact');
   const [isCreatingMemory, setIsCreatingMemory] = useState(false);
   const [memorySearch, setMemorySearch] = useState('');
+  const [selectedMemories, setSelectedMemories] = useState<number[]>([]);
+  const [nukeMemoriesProgress, setNukeMemoriesProgress] = useState(0);
+  const nukeMemoriesTimerRef = useRef<number | null>(null);
 
   // Agents State
   const [agents, setAgents] = useState<Array<{id: number, name: string, prompt: string, created_at?: string}>>([]);
@@ -155,7 +158,10 @@ function App() {
         }
     })
     .then(res => res.json())
-    .then(data => setMemories(data))
+    .then(data => {
+        setMemories(data);
+        setSelectedMemories([]);
+    })
     .catch(console.error);
   };
 
@@ -184,17 +190,72 @@ function App() {
     }
   };
 
-  const handleDeleteMemory = async (id: number) => {
-      if(!confirm("Forget this memory?")) return;
+  const toggleMemory = (id: number) => {
+      setSelectedMemories(prev => 
+        prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]
+      );
+  };
+
+  const handleDeleteSelectedMemories = async () => {
+      if (selectedMemories.length === 0) return;
+      if (!confirm(`Forget ${selectedMemories.length} memories?`)) return;
+
       try {
-          const res = await fetch(`/api/memories/${id}`, {
+          const res = await fetch('/api/memories/selected/bulk', {
+              method: 'DELETE',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`,
+                  ...API_HEADERS
+              },
+              body: JSON.stringify({ memory_ids: selectedMemories })
+          });
+          if (res.ok) {
+              setSelectedMemories([]);
+              fetchMemories(memorySearch);
+          }
+      } catch (e) {
+          console.error(e);
+      }
+  };
+
+  const startNukeMemories = () => {
+    let progress = 0;
+    if (nukeMemoriesTimerRef.current) clearInterval(nukeMemoriesTimerRef.current);
+    
+    nukeMemoriesTimerRef.current = window.setInterval(() => {
+        progress += 4; // 25 steps * 40ms = 1000ms
+        setNukeMemoriesProgress(progress);
+        if (progress >= 100) {
+            if(nukeMemoriesTimerRef.current) clearInterval(nukeMemoriesTimerRef.current);
+            handleNukeMemories();
+            setNukeMemoriesProgress(0);
+        }
+    }, 40);
+  };
+
+  const cancelNukeMemories = () => {
+      if (nukeMemoriesTimerRef.current) {
+          clearInterval(nukeMemoriesTimerRef.current);
+          nukeMemoriesTimerRef.current = null;
+      }
+      setNukeMemoriesProgress(0);
+  };
+
+  const handleNukeMemories = async () => {
+      try {
+          const res = await fetch('/api/memories/all/nuke', {
               method: 'DELETE',
               headers: {
                   'Authorization': `Bearer ${token}`,
                   ...API_HEADERS
               }
           });
-          if (res.ok) fetchMemories(memorySearch);
+          if (res.ok) {
+              alert("MEMORIES NUKED");
+              setSelectedMemories([]);
+              fetchMemories(memorySearch);
+          }
       } catch (e) {
           console.error(e);
       }
@@ -739,19 +800,36 @@ function App() {
             )}
 
             {view === 'memories' && (
-                <div className="memories-view" style={{ padding: '2rem', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                <div className="memories-view" style={{ padding: '2rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                         <h2>Memories</h2>
-                        <button 
-                            onClick={() => setIsCreatingMemory(!isCreatingMemory)}
-                            className="primary-btn"
-                            style={{ 
-                              width: 'auto',
-                              padding: '.5rem'
-                             }}
-                        >
-                            {isCreatingMemory ? 'Cancel' : 'Add Memory'}
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button 
+                                onClick={handleDeleteSelectedMemories}
+                                disabled={selectedMemories.length === 0}
+                                style={{
+                                    backgroundColor: selectedMemories.length > 0 ? '#ef4444' : '#e2e8f0',
+                                    color: selectedMemories.length > 0 ? 'white' : '#94a3b8',
+                                    border: 'none',
+                                    padding: '0.5rem 1rem',
+                                    borderRadius: '4px',
+                                    cursor: selectedMemories.length > 0 ? 'pointer' : 'not-allowed',
+                                    fontWeight: '600'
+                                }}
+                            >
+                                Delete Selected ({selectedMemories.length})
+                            </button>
+                            <button 
+                                onClick={() => setIsCreatingMemory(!isCreatingMemory)}
+                                className="primary-btn"
+                                style={{ 
+                                  width: 'auto',
+                                  padding: '.5rem'
+                                 }}
+                            >
+                                {isCreatingMemory ? 'Cancel' : 'Add Memory'}
+                            </button>
+                        </div>
                     </div>
 
                     <div style={{ marginBottom: '2rem' }}>
@@ -813,29 +891,57 @@ function App() {
                         </div>
                     )}
 
-                    <div className="memories-list" style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                    <div className="memories-list" style={{ flex: 1, overflowY: 'auto' }}>
                         {memories.map(memory => (
-                            <div key={memory.id} style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', position: 'relative' }}>
-                                <button 
-                                    onClick={() => handleDeleteMemory(memory.id)}
-                                    style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
-                                    title="Forget"
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                                </button>
-                                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
-                                    {new Date(memory.created_at).toLocaleDateString()} • {memory.kind}
-                                </div>
-                                <div style={{ fontSize: '0.9rem', color: '#64748b', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto' }}>
-                                    {memory.content}
+                            <div key={memory.id} style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', alignItems: 'flex-start' }}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={selectedMemories.includes(memory.id)}
+                                    onChange={() => toggleMemory(memory.id)}
+                                    style={{ marginTop: '1.5rem', width: '20px', height: '20px', flexShrink: 0 }}
+                                />
+                                <div style={{ flex: 1, background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+                                        {new Date(memory.created_at).toLocaleDateString()} • {memory.kind}
+                                    </div>
+                                    <div style={{ fontSize: '0.9rem', color: '#64748b', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto' }}>
+                                        {memory.content}
+                                    </div>
                                 </div>
                             </div>
                         ))}
                         {memories.length === 0 && !isCreatingMemory && (
-                            <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>
+                            <div style={{ textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>
                                 No memories found.
                             </div>
                         )}
+                    </div>
+
+                    <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+                        <button
+                            onMouseDown={startNukeMemories}
+                            onMouseUp={cancelNukeMemories}
+                            onMouseLeave={cancelNukeMemories}
+                            onTouchStart={startNukeMemories}
+                            onTouchEnd={cancelNukeMemories}
+                            style={{
+                                background: `linear-gradient(to right, #dc2626 ${nukeMemoriesProgress}%, #ef4444 ${nukeMemoriesProgress}%)`,
+                                color: 'white',
+                                border: 'none',
+                                padding: '.5rem',
+                                width: '100%',
+                                maxWidth: '200px',
+                                borderRadius: '4px',
+                                fontSize: '1.2rem',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                transition: 'background 0.1s linear',
+                                userSelect: 'none'
+                            }}
+                        >
+                            {nukeMemoriesProgress > 0 ? `HOLD TO NUKE... ${nukeMemoriesProgress}%` : 'NUKE MEMORIES'}
+                        </button>
+                        <p style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.5rem' }}>Press and hold to delete all memories</p>
                     </div>
                 </div>
             )}
