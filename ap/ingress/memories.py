@@ -1,24 +1,23 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, text
 
-from ..database import get_db
+from ..database import get_db, get_session_maker
 from ..models.users import User
 from ..models.memory import Memory
 from .auth import get_current_user
 from ..memory import MemoryStore
-from ..database import get_session_maker
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
 
-# Dependency to get memory store (reusing the session maker)
+# Dependency to get memory store (for create operations)
 def get_memory_store():
     return MemoryStore(get_session_maker())
 
@@ -38,26 +37,26 @@ class MemoryResponse(BaseModel):
 
 @router.get("/", response_model=List[MemoryResponse])
 async def list_memories(
-    query: Optional[str] = Query(None, description="Search query"),
-    limit: int = 20,
+    limit: int = 100,
     user: User = Depends(get_current_user),
-    store: MemoryStore = Depends(get_memory_store)
+    db: AsyncSession = Depends(get_db)
 ):
-    """List or search memories."""
-    if query:
-        memories = await store.retrieve_relevant(query, user.user_id, limit=limit)
-    else:
-        # If no query, just return recent ones (using a blank query effectively falls back to recency)
-        memories = await store.retrieve_relevant("", user.user_id, limit=limit)
-        
+    """List all memories for the current user. Search/filtering is handled client-side."""
+    stmt = select(Memory).where(
+        Memory.user_id == user.user_id
+    ).order_by(Memory.created_at.desc()).limit(limit)
+    
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+    
     return [
         MemoryResponse(
-            id=m.id,
-            content=m.content,
-            kind=m.kind,
-            created_at=m.created_at,
-            importance=m.importance
-        ) for m in memories
+            id=row.id,
+            content=row.content,
+            kind=row.kind,
+            created_at=row.created_at,
+            importance=row.importance
+        ) for row in rows
     ]
 
 @router.post("/", response_model=dict)

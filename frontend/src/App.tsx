@@ -147,11 +147,8 @@ function App() {
     }
   }, [view, token]);
 
-  const fetchMemories = (query = '') => {
-    let url = '/api/memories/';
-    if (query) url += `?query=${encodeURIComponent(query)}`;
-    
-    fetch(url, {
+  const fetchMemories = () => {
+    fetch('/api/memories/', {
         headers: {
             'Authorization': `Bearer ${token}`,
             ...API_HEADERS
@@ -164,6 +161,14 @@ function App() {
     })
     .catch(console.error);
   };
+  
+  // Client-side filtering for memories (like chat history)
+  const filteredMemories = memories.filter((memory: any) => {
+    if (!memorySearch.trim()) return true;
+    const term = memorySearch.toLowerCase();
+    return memory.content.toLowerCase().includes(term) || 
+           memory.kind.toLowerCase().includes(term);
+  });
 
   const handleCreateMemory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -212,7 +217,7 @@ function App() {
           });
           if (res.ok) {
               setSelectedMemories([]);
-              fetchMemories(memorySearch);
+              fetchMemories();
           }
       } catch (e) {
           console.error(e);
@@ -254,7 +259,7 @@ function App() {
           if (res.ok) {
               alert("MEMORIES NUKED");
               setSelectedMemories([]);
-              fetchMemories(memorySearch);
+              fetchMemories();
           }
       } catch (e) {
           console.error(e);
@@ -848,10 +853,7 @@ function App() {
                         <input 
                             type="text" 
                             value={memorySearch}
-                            onChange={(e) => {
-                                setMemorySearch(e.target.value);
-                                fetchMemories(e.target.value);
-                            }}
+                            onChange={(e) => setMemorySearch(e.target.value)}
                             placeholder="Search memories..."
                             style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
                         />
@@ -904,7 +906,7 @@ function App() {
                     )}
 
                     <div className="memories-list" style={{ flex: 1, overflowY: 'auto' }}>
-                        {memories.map(memory => (
+                        {filteredMemories.map((memory: any) => (
                             <div key={memory.id} style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', alignItems: 'flex-start' }}>
                                 <input 
                                     type="checkbox" 
@@ -922,7 +924,7 @@ function App() {
                                 </div>
                             </div>
                         ))}
-                        {memories.length === 0 && !isCreatingMemory && (
+                        {filteredMemories.length === 0 && !isCreatingMemory && (
                             <div style={{ textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>
                                 No memories found.
                             </div>
