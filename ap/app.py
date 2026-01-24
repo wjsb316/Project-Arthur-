@@ -82,7 +82,8 @@ def create_app(
     )
 
     # Restrict access to frontend only
-    application.add_middleware(FrontendAccessMiddleware)
+    # TODO: Re-enable after testing cross-network access
+    # application.add_middleware(FrontendAccessMiddleware)
     
     application.add_middleware(
         CORSMiddleware,

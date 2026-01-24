@@ -8,6 +8,11 @@ Nvidia container toolkit inside 24.04 WSL
 WSL (local dev env)
     user: arthur
     pass: assistant
+Create mirrored network between WSL and Windows host
+    notepad "$env:USERPROFILE\.wslconfig":
+        [wsl2]
+        networkingMode=mirrored
+Create windows firewall rule to allow traffic on port 8000
 Run container in WSL
     docker volume create AP-engine
     docker run --rm -v AP-engine:/app alpine/git clone https://github.com/wjsb316/Project-Arthur-.git /app
