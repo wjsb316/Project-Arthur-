@@ -78,6 +78,14 @@ const IconCat = () => (
     </svg>
 );
 
+const TypingIndicator = () => (
+    <div className="typing-indicator">
+        <span className="typing-dot"></span>
+        <span className="typing-dot"></span>
+        <span className="typing-dot"></span>
+    </div>
+);
+
 
 function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
@@ -132,6 +140,7 @@ function App() {
   const [historySearch, setHistorySearch] = useState('');
   const [nukeProgress, setNukeProgress] = useState(0);
   const nukeTimerRef = useRef<number | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   
   const [isNewSession, setIsNewSession] = useState(true);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
@@ -454,6 +463,7 @@ function App() {
     const userMessage = { role: 'user', content: chatInput };
     setChatHistory(prev => [...prev, userMessage]);
     setChatInput('');
+    setIsLoading(true);
 
     try {
         const payload: { text: string; new_session: boolean; session_id?: number } = { 
@@ -490,9 +500,13 @@ function App() {
             }
         } else {
             console.error("Failed to send chat message");
+            setChatHistory(prev => [...prev, { role: 'Arthur', content: 'error returning info.' }]);
         }
     } catch (err) {
         console.error(err);
+        setChatHistory(prev => [...prev, { role: 'Arthur', content: 'error returning info.' }]);
+    } finally {
+        setIsLoading(false);
     }
   };
 
@@ -728,6 +742,12 @@ function App() {
                                 <div className="message-content">{msg.content}</div>
                             </div>
                         ))}
+                        {isLoading && (
+                            <div className="chat-message assistant">
+                                <div className="message-icon"><IconCat /></div>
+                                <TypingIndicator />
+                            </div>
+                        )}
                         <div ref={messagesEndRef} />
                     </div>
 
