@@ -1,4 +1,4 @@
-"""Model provider interfaces and OpenAI GPT-5.2 implementation."""
+"""Model provider interfaces and LLM streaming implementation."""
 
 from __future__ import annotations
 
@@ -60,14 +60,14 @@ class ModelProvider(Protocol):
 
 
 class OpenAIModelProvider:
-    """Streams completions from GPT-5.2 using the OpenAI API."""
+    """Streams completions from Chosen LLM provider."""
 
     def __init__(
         self,
         api_key: str | None,
         *,
-        base_url: str = "https://api.openai.com/v1",
-        model: str = "gpt-5.2",
+        base_url: str = "https://api.x.ai/v1",
+        model: str = "grok-4-1-fast-reasoning",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._api_key = api_key
@@ -79,19 +79,30 @@ class OpenAIModelProvider:
     async def stream(
         self, stream_id: str, text: str, cancel_event: asyncio.Event
     ) -> AsyncGenerator[str, None]:
-        """Stream completion tokens from OpenAI."""
+        """Stream completion tokens from model provider."""
         if not self._api_key:
             raise RuntimeError("model provider unavailable: missing api key")
 
         self._stream_events[stream_id] = cancel_event
         start = time.perf_counter()
-        url = f"{self._base_url}/chat/completions"
+        is_xai = "x.ai" in self._base_url
+        if is_xai:
+            url = f"{self._base_url}/responses"
+            payload = {
+                "model": self._model,
+                "stream": True,
+                "input": text,  # xAI responses endpoint uses "input" not "messages"
+                "tools": [{"type": "web_search"}],
+            }
+        else:
+            url = f"{self._base_url}/chat/completions"
+            payload = {
+                "model": self._model,
+                "stream": True,
+                "messages": [{"role": "user", "content": text}],
+            }
+        
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        payload = {
-            "model": self._model,
-            "stream": True,
-            "messages": [{"role": "user", "content": text}],
-        }
 
         try:
             async with self._client.stream("POST", url, headers=headers, json=payload) as response:
@@ -102,6 +113,12 @@ class OpenAIModelProvider:
                     
                     if not line:
                         continue
+                    
+                    # Debug: log raw line from Grok
+                    logger.info(
+                        "provider_raw_line",
+                        extra={"event": "provider_raw_line", "stream_id": stream_id, "line": line[:500]},
+                    )
                         
                     # Handle concatenated SSE events
                     parts = line.split("data: ")
@@ -118,13 +135,32 @@ class OpenAIModelProvider:
                         
                         try:
                             parsed = json.loads(part)
-                            delta = parsed["choices"][0]["delta"].get("content", "")
-                            if delta:
-                                yield delta
+                            # Debug: log parsed structure
+                            logger.info(
+                                "provider_parsed_chunk",
+                                extra={"event": "provider_parsed", "stream_id": stream_id, "keys": list(parsed.keys())},
+                            )
+                            
+                            # Handle xAI responses endpoint streaming format
+                            if is_xai:
+                                # xAI uses event-based streaming with "type" field
+                                event_type = parsed.get("type", "")
+                                if event_type == "response.output_text.delta":
+                                    delta = parsed.get("delta", "")
+                                    if delta:
+                                        yield delta
+                                elif event_type in ("response.completed", "response.done"):
+                                    break
+                                # Other event types (response.created, etc.) are ignored
+                            else:
+                                # OpenAI chat completions format
+                                delta = parsed["choices"][0]["delta"].get("content", "")
+                                if delta:
+                                    yield delta
                         except json.JSONDecodeError:
                              logger.warning(
                                 "provider_stream_parse_warning",
-                                extra={"event": "provider_parse_warning", "provider": "openai", "stream_id": stream_id, "part": part},
+                                extra={"event": "provider_parse_warning", "provider": "openai", "stream_id": stream_id, "part": part[:200]},
                             )
                         except Exception as exc:  # noqa: BLE001
                             logger.error(
@@ -133,12 +169,34 @@ class OpenAIModelProvider:
                                 exc_info=exc,
                             )
                             break
+        except httpx.HTTPStatusError as exc:
+            # Try to read the response content for more details
+            error_body = "unknown"
+            try:
+                error_body = await exc.response.aread()
+                error_body = error_body.decode("utf-8")
+            except Exception:
+                pass
+                
+            logger.error(
+                "provider_http_error",
+                extra={
+                    "event": "provider_error", 
+                    "provider": "openai", 
+                    "stream_id": stream_id,
+                    "status_code": exc.response.status_code,
+                    "error_body": error_body
+                },
+                exc_info=exc,
+            )
+            raise RuntimeError(f"Model provider error (HTTP {exc.response.status_code}): {error_body[:200]}")
         except httpx.HTTPError as exc:
             logger.error(
                 "provider_http_error",
                 extra={"event": "provider_error", "provider": "openai", "stream_id": stream_id},
                 exc_info=exc,
             )
+            raise RuntimeError(f"Model provider unavailable: {exc}")
         finally:
             latency_ms = (time.perf_counter() - start) * 1000
             logger.info(

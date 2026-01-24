@@ -98,7 +98,7 @@ All endpoints validate incoming messages against the **Arthur Protocol v1.1** JS
 
 | Service | Location | Responsibility |
 |---------|----------|----------------|
-| **ModelProvider** | `ap/models/provider.py` | Interface for LLM providers; `OpenAIModelProvider` streams from GPT-5.2 |
+| **ModelProvider** | `ap/models/provider.py` | Interface for LLM providers; `OpenAIModelProvider` streams from configured LLM |
 | **MemoryStore** | `ap/memory/store.py` | database-backed memory with decay-weighted retrieval algorithm |
 | **Protocol Validator** | `ap/protocol/validator.py` | JSON Schema validation for all protocol messages |
 

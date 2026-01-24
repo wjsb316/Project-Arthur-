@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         memory_db_path: Path to the SQLite memory database.
         openai_api_key: API key for OpenAI (if using OpenAI provider).
         openai_base_url: Base URL for OpenAI API (default: "https://api.openai.com/v1").
-        openai_model: OpenAI model to use (default: "gpt-5.2").
+        openai_model: LLM model to use (default: "grok-4-fast-reasoning").
     """
     app_name: str = "Arthur Prime"
     host: str = "0.0.0.0"
