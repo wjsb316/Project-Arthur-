@@ -28,6 +28,8 @@ Development environment
     cd /home/arthur/Project-Arthur-/frontend
     npm install
     npm run dev
+Log observations:
+    docker logs arthur-prime 2>&1 | grep "llm_request_text"
 
 NeuTTS Air Q8
 Faster-Whisper

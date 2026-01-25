@@ -85,6 +85,19 @@ class OpenAIModelProvider:
 
         self._stream_events[stream_id] = cancel_event
         start = time.perf_counter()
+        
+        # Log complete text being sent to LLM for debugging/relevance tuning
+        logger.info(
+            "llm_request_text",
+            extra={
+                "event": "llm_request_text",
+                "stream_id": stream_id,
+                "model": self._model,
+                "text_length": len(text),
+                "text_content": text,
+            },
+        )
+        
         is_xai = "x.ai" in self._base_url
         if is_xai:
             url = f"{self._base_url}/responses"

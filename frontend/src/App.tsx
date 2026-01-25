@@ -500,11 +500,11 @@ function App() {
             }
         } else {
             console.error("Failed to send chat message");
-            setChatHistory(prev => [...prev, { role: 'Arthur', content: 'error returning info.' }]);
+            setChatHistory(prev => [...prev, { role: 'Arthur', content: 'I am having trouble communicating with the model provider.' }]);
         }
     } catch (err) {
         console.error(err);
-        setChatHistory(prev => [...prev, { role: 'Arthur', content: 'error returning info.' }]);
+        setChatHistory(prev => [...prev, { role: 'Arthur', content: 'I am having trouble communicating with the model provider.' }]);
     } finally {
         setIsLoading(false);
     }
