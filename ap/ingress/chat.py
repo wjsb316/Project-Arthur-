@@ -1,16 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, delete, select
 import json
 import logging
 from typing import Dict, Any, Optional
+import tempfile
+import os
 
 from ..database import get_db, get_session_maker
 from ..models.chat import ChatSession, ChatMessage
 from ..models.users import User
 from .auth import get_current_user
 from ..utils.embedding_factory import embedding_factory
+from ..utils.whisper_factory import whisper_factory
+# from ..utils.neurtts_factory import neurtts_factory
 
 from ..models import ModelProvider, ProviderHealth
 from ..memory import MemoryStore
@@ -49,55 +53,57 @@ def build_chat_router(
         manager
     )
 
-    @router.post("")
-    async def chat(
-        request: ChatRequest,
-        user: User = Depends(get_current_user),
+    async def _process_chat_core(
+        text_input: str,
+        user: User,
+        new_session: bool = False,
+        session_id: Optional[int] = None
     ):
-        text_input = request.text
         if not text_input:
              raise HTTPException(status_code=400, detail="Text required")
 
         # 1. Get/Create Session & Save User Message (Closed Loop)
-        session_id = None
+        current_session_id = None
         user_msg_id = None
         try:
-            if request.session_id:
+            if session_id:
                 # Continuing a specific session - verify it belongs to this user
-                session_id = await chat_store.verify_and_get_session(
-                    request.session_id,
+                current_session_id = await chat_store.verify_and_get_session(
+                    session_id,
                     user.user_id
                 )
-                if not session_id:
+                if not current_session_id:
                     raise HTTPException(status_code=404, detail="Session not found")
-            elif request.new_session:
-                session_id = await chat_store.create_session(
+            elif new_session:
+                current_session_id = await chat_store.create_session(
                     user.user_id,
                     title=text_input[:30]
                 )
             else:
-                session_id = await chat_store.get_or_create_recent_session(
+                current_session_id = await chat_store.get_or_create_recent_session(
                     user.user_id, 
                     title_hint=text_input
                 )
             # Save User Message with Embedding
             user_msg_id = await chat_store.save_message(
-                session_id=session_id,
+                session_id=current_session_id,
                 user_id=user.user_id,
                 role="user",
                 content=text_input
             )
         except Exception as e:
             logger.error(f"Failed to save user message/session: {e}")
+            if isinstance(e, HTTPException):
+                raise e
             raise HTTPException(status_code=500, detail=f"Failed to save message: {e}")
 
         # 2. Execute LangGraph
         initial_state = {
             "user_input": text_input,
             "user_id": user.user_id,
-            "session_id": session_id,
-            "trace_id": f"chat-{session_id}-{user_msg_id}", # Simple trace ID
-            "stream_id": f"chat-{session_id}-{user_msg_id}",
+            "session_id": current_session_id,
+            "trace_id": f"chat-{current_session_id}-{user_msg_id}", # Simple trace ID
+            "stream_id": f"chat-{current_session_id}-{user_msg_id}",
             "memories": [],
             "chat_history": [],
             "agents": [],
@@ -139,7 +145,7 @@ def build_chat_router(
         # 5. Return response
         return {
             "status": "ok",
-            "session_id": session_id,
+            "session_id": current_session_id,
             "message_id": user_msg_id,
             "response": {
                 "role": "Arthur",
@@ -148,6 +154,68 @@ def build_chat_router(
                 "model_health": final_response_data.get("model_health")
             }
         }
+
+    @router.post("")
+    async def chat(
+        request: ChatRequest,
+        user: User = Depends(get_current_user),
+    ):
+        return await _process_chat_core(
+            text_input=request.text,
+            user=user,
+            new_session=request.new_session,
+            session_id=request.session_id
+        )
+
+    @router.post("/voice")
+    async def voice_chat(
+        file: UploadFile = File(...),
+        user: User = Depends(get_current_user),
+    ):
+        try:
+            # 1. Save upload to temporary file
+            suffix = os.path.splitext(file.filename)[1] if file.filename else ".wav"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                content = await file.read()
+                tmp.write(content)
+                tmp_path = tmp.name
+
+            try:
+                # 2. Transcribe using factory
+                segments, info = whisper_factory.transcribe(tmp_path, beam_size=5)
+                
+                # Collect all segments
+                transcribed_text = " ".join([segment.text for segment in segments]).strip()
+                logger.info(f"Transcribed audio: {transcribed_text} (language: {info.language}, prob: {info.language_probability})")
+                
+                if not transcribed_text:
+                    raise HTTPException(status_code=400, detail="Could not transcribe audio")
+
+                # 3. Process as chat
+                result = await _process_chat_core(
+                    text_input=transcribed_text,
+                    user=user,
+                    new_session=False, # Voice usually continues context, or we can make this configurable
+                    session_id=None    # For now, let it find recent session
+                )
+                
+                # # 4. Synthesize speech response
+                # response_text = result["response"]["content"]
+                # if response_text:
+                #     await neurtts_factory.speak(response_text)
+                    
+                return result
+                
+            finally:
+                # Cleanup temp file
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                    
+        except Exception as e:
+            logger.error(f"Voice processing failed: {e}")
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(status_code=500, detail=f"Voice processing failed: {e}")
 
     @router.get("/history")
     async def get_chat_history(

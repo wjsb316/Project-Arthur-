@@ -39,6 +39,8 @@ RUN apt-get update && apt-get install -y \
     avahi-utils \
     dbus \
     cmake \
+    portaudio19-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # # Ensure CUDA libraries are in LD_LIBRARY_PATH
