@@ -28,14 +28,14 @@ from .middleware import FrontendAccessMiddleware
 app: FastAPI | None = None
 
 
-# from .utils.neurtts_factory import neurtts_factory
+from .utils.neurtts_factory import neurtts_factory
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Initialize DB
     await init_db()
     # Initialize TTS model
-    # neurtts_factory.initialize()
+    neurtts_factory.initialize()
     yield
     # Shutdown: Clean up (if needed)
 

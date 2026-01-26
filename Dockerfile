@@ -71,6 +71,8 @@ COPY requirements.txt .
 # 1. Install llama-cpp-python specifically from our built wheels (force no PyPI lookup for this package)
 # 2. Install the rest from requirements.txt
 RUN pip install --no-cache-dir --no-index --find-links=/wheels llama-cpp-python==0.3.16 && \
+
+RUN pip install llama-cpp-python --force-reinstall --no-cache-dir --upgrade && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy frontend build to a system location preserved during volume mounts

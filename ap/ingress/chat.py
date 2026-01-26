@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, delete, select
 import json
 import logging
+import base64
 from typing import Dict, Any, Optional
 import tempfile
 import os
@@ -14,7 +15,7 @@ from ..models.users import User
 from .auth import get_current_user
 from ..utils.embedding_factory import embedding_factory
 from ..utils.whisper_factory import whisper_factory
-# from ..utils.neurtts_factory import neurtts_factory
+from ..utils.neurtts_factory import neurtts_factory
 
 from ..models import ModelProvider, ProviderHealth
 from ..memory import MemoryStore
@@ -199,11 +200,15 @@ def build_chat_router(
                     session_id=None    # For now, let it find recent session
                 )
                 
-                # # 4. Synthesize speech response
-                # response_text = result["response"]["content"]
-                # if response_text:
-                #     await neurtts_factory.speak(response_text)
+                # 4. Synthesize speech response
+                response_text = result["response"]["content"]
+                audio_base64 = None
+                if response_text:
+                    wav_bytes = await neurtts_factory.generate_audio_wav(response_text)
+                    if wav_bytes:
+                        audio_base64 = base64.b64encode(wav_bytes).decode('utf-8')
                     
+                result["audio_base64"] = audio_base64
                 return result
                 
             finally:

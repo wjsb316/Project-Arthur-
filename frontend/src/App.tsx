@@ -644,6 +644,16 @@ function App() {
                       setIsNewSession(false);
                   }
 
+                  // Play audio response if available
+                  if (data.audio_base64) {
+                      try {
+                          const audio = new Audio(`data:audio/wav;base64,${data.audio_base64}`);
+                          audio.play().catch(e => console.error("Audio play error:", e));
+                      } catch (e) {
+                          console.error("Error creating audio:", e);
+                      }
+                  }
+
                   // Add messages to history
                   // Since we don't have the transcribed text returned explicitly in the same structure as a message
                   // we might want to fetch history or rely on what the backend returns.
