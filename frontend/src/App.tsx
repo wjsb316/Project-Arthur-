@@ -591,6 +591,12 @@ function App() {
 
   // Voice recording functions
   const startRecording = async () => {
+      // Check for secure context (required for getUserMedia on non-localhost)
+      if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+          alert("Microphone access blocked: You are accessing this site via an insecure connection (HTTP). Browsers require HTTPS for microphone access on mobile devices. Please use HTTPS or localhost.");
+          return;
+      }
+
       try {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           const mediaRecorder = new MediaRecorder(stream);
@@ -607,7 +613,11 @@ function App() {
           setIsRecording(true);
       } catch (err) {
           console.error("Error accessing microphone:", err);
-          alert("Could not access microphone. Please allow permissions.");
+          let msg = "Could not access microphone.";
+          if (!window.isSecureContext) {
+             msg += " This may be due to using HTTP instead of HTTPS.";
+          }
+          alert(msg + " Please check permissions and connection security.");
       }
   };
 
