@@ -633,75 +633,128 @@ function App() {
           formData.append('file', audioBlob, 'recording.wav');
 
           try {
-              const res = await fetch('/api/chat/voice', {
+              // Use streaming endpoint for lower latency
+              const res = await fetch('/api/chat/voice/stream', {
                   method: 'POST',
                   headers: {
                       'Authorization': `Bearer ${token}`,
-                      ...API_HEADERS
+                      // Don't include Content-Type - let browser set it for FormData
                   },
-                  body: formData // Let browser set Content-Type multipart/form-data
+                  body: formData
               });
 
               if (res.ok) {
-                  const data = await res.json();
+                  // Extract metadata from headers
+                  const sessionId = res.headers.get('X-Session-ID');
+                  const transcribedText = res.headers.get('X-Transcribed-Text');
                   
-                  // Update chat history with transcription and response
-                  // Note: The backend logic creates a session if needed.
-                  // Ideally we should sync that state back here.
-                  
-                  if (data.session_id) {
-                      setCurrentSessionId(data.session_id);
+                  if (sessionId) {
+                      setCurrentSessionId(parseInt(sessionId));
                       setIsNewSession(false);
                   }
 
-                  // Play audio response if available
-                  if (data.audio_base64) {
+                  console.log("Transcribed:", transcribedText);
+
+                  // Stream audio response - play chunks as they arrive
+                  if (res.body) {
                       try {
-                          const audio = new Audio(`data:audio/wav;base64,${data.audio_base64}`);
-                          audio.play().catch(e => console.error("Audio play error:", e));
+                          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+                          const sampleRate = 24000; // From backend
+                          const reader = res.body.getReader();
+                          
+                          let nextStartTime = 0;
+                          let chunkCount = 0;
+                          let playbackStarted = false;
+                          const bufferChunks = 1; // Buffer only 1 chunk before starting (nano model is fast)
+                          const bufferedAudioBuffers: AudioBuffer[] = [];
+                          
+                          console.log("Starting audio stream playback...");
+                          
+                          const createAudioBuffer = (value: Uint8Array): AudioBuffer | null => {
+                              // Ensure the byte length is a multiple of 2 (int16 size)
+                              if (value.length % 2 !== 0) {
+                                  console.warn(`Chunk has invalid length: ${value.length} bytes (not multiple of 2)`);
+                                  return null;
+                              }
+                              
+                              // Convert int16 PCM to float32 for Web Audio API
+                              const int16Array = new Int16Array(value.buffer, value.byteOffset, value.byteLength / 2);
+                              const float32Array = new Float32Array(int16Array.length);
+                              
+                              // Convert int16 [-32768, 32767] to float32 [-1.0, 1.0]
+                              for (let i = 0; i < int16Array.length; i++) {
+                                  float32Array[i] = int16Array[i] / 32768.0;
+                              }
+                              
+                              // Create AudioBuffer from the float32 samples
+                              const audioBuffer = audioContext.createBuffer(1, float32Array.length, sampleRate);
+                              audioBuffer.getChannelData(0).set(float32Array);
+                              return audioBuffer;
+                          };
+                          
+                          const scheduleAudioBuffer = (audioBuffer: AudioBuffer) => {
+                              const source = audioContext.createBufferSource();
+                              source.buffer = audioBuffer;
+                              source.connect(audioContext.destination);
+                              
+                              const now = audioContext.currentTime;
+                              const startTime = Math.max(now + 0.01, nextStartTime);
+                              
+                              source.start(startTime);
+                              nextStartTime = startTime + audioBuffer.duration;
+                              
+                              chunkCount++;
+                              console.log(`Chunk ${chunkCount}: Scheduled at ${startTime.toFixed(3)}s (now: ${now.toFixed(3)}s, duration: ${audioBuffer.duration.toFixed(3)}s)`);
+                          };
+                          
+                          // Read and play chunks as they arrive
+                          while (true) {
+                              const { done, value } = await reader.read();
+                              
+                              if (done) {
+                                  console.log(`Streaming complete. Played ${chunkCount} chunks.`);
+                                  break;
+                              }
+                              
+                              if (value && value.length > 0) {
+                                  const audioBuffer = createAudioBuffer(value);
+                                  if (!audioBuffer) continue;
+                                  
+                                  if (!playbackStarted) {
+                                      // Buffer initial chunks
+                                      bufferedAudioBuffers.push(audioBuffer);
+                                      console.log(`Buffering chunk ${bufferedAudioBuffers.length}/${bufferChunks}...`);
+                                      
+                                      if (bufferedAudioBuffers.length >= bufferChunks) {
+                                          // Start playback - schedule all buffered chunks
+                                          playbackStarted = true;
+                                          nextStartTime = audioContext.currentTime + 0.1;
+                                          console.log(`Starting playback at ${nextStartTime.toFixed(3)}s`);
+                                          
+                                          for (const buf of bufferedAudioBuffers) {
+                                              scheduleAudioBuffer(buf);
+                                          }
+                                          bufferedAudioBuffers.length = 0;
+                                      }
+                                  } else {
+                                      // Playback already started, schedule immediately
+                                      scheduleAudioBuffer(audioBuffer);
+                                  }
+                              }
+                          }
+                          
                       } catch (e) {
-                          console.error("Error creating audio:", e);
+                          console.error("Error processing streaming audio:", e);
                       }
                   }
 
-                  // Add messages to history
-                  // Since we don't have the transcribed text returned explicitly in the same structure as a message
-                  // we might want to fetch history or rely on what the backend returns.
-                  // The backend returns { response: { content: ... } } but not the user's transcribed text in the response body directly 
-                  // unless we change the backend to return it.
-                  // HOWEVER, the backend logic I wrote:
-                  // return await _process_chat_core(...)
-                  // _process_chat_core returns the standard response structure.
-                  
-                  // To show the user what they said, we might need the transcription.
-                  // But wait, the current backend implementation of _process_chat_core doesn't return the input text in the response.
-                  // It returns { status, session_id, message_id, response: {...} }
-                  
-                  // For a better UX, we should probably modify the backend to return the transcribed text,
-                  // OR we can just fetch the latest history.
-                  // Let's just fetch the latest history for now to be safe and simple.
-                //   fetchHistory();
-                  
-                  // Also switch to chat view to see the response?
-                  // The requirement said: "That text should take the route that is already established for the chat interface to the LLM provider."
-                  // And "Voice in from the user and speech audio out from the model."
-                  // It doesn't explicitly say we must switch views, but seeing the chat is good.
-                  // For now, let's keep them in the voice view as they might want to talk more?
-                  // "In that voice tab there is a react graphical component... below it should be a button"
-                  
-                  // If we want to show the response in the voice tab, we might need a way to display it.
-                  // But the prompt says "text should take the route... to the chat interface".
-                  
-                  // Let's notify the user via a simple alert or just console log for now, 
-                  // or maybe a small toast if we had one.
-                  // Or we can speak it back (future task).
-                  console.log("Voice processed", data);
+                  console.log("Voice processed successfully");
                   
               } else {
-                  console.error("Voice processing failed");
+                  console.error("Voice processing failed:", res.status, res.statusText);
               }
           } catch (e) {
-              console.error(e);
+              console.error("Voice processing error:", e);
           }
           
           // Stop all tracks

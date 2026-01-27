@@ -66,15 +66,13 @@ class NeurTTSFactory:
             # )
 
 
-            # assert backbone in ["neuphonic/neutts-air-q4-gguf", "neuphonic/neutts-air-q8-gguf"], "Must be a GGUF ckpt as streaming is only currently supported by llama-cpp."
-            
-            # Initialize NeuTTSAir with the desired model and codec
+            # Use nano model for minimal latency (recommended for streaming)
+            # nano is significantly faster than air while maintaining good quality
             self._model = NeuTTSAir(
-                backbone_repo="neuphonic/neutts-air-q4-gguf",
-                # backbone_repo="neuphonic/neutts-nano",
-                backbone_device=None,
-                codec_repo="neuphonic/neucodec-onnx-decoder",
-                codec_device=None
+                backbone_repo="neuphonic/neutts-nano-q4-gguf",  # Faster, lower latency
+                backbone_device="cpu",  # Explicitly set to CPU for GGUF
+                codec_repo="neuphonic/neucodec-onnx-decoder",  # ONNX decoder for speed
+                codec_device="cpu"  # ONNX runs on CPU
             )
             
             # Load default reference
@@ -115,7 +113,7 @@ class NeurTTSFactory:
 
     async def generate_audio_wav(self, text: str) -> bytes:
         """
-        Synthesize speech from text and return WAV bytes.
+        Synthesize speech from text and return WAV bytes (non-streaming).
         """
         if not text:
             return b""
@@ -172,6 +170,86 @@ class NeurTTSFactory:
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _generate)
+    
+    async def generate_audio_stream(self, text: str):
+        """
+        Synthesize speech from text and yield raw PCM audio chunks as they're generated.
+        Yields 16-bit PCM data at 24kHz, mono.
+        Client should use Web Audio API to play these chunks directly.
+        """
+        if not text:
+            return
+            
+        # Clean text before processing
+        # text = self._clean_text(text)
+        if not text:
+            logger.warning("Text became empty after cleaning.")
+            return
+
+        if self._model is None:
+            self._initialize_model()
+            
+        if self._model is None:
+            logger.error("Model not initialized, cannot generate audio.")
+            return
+
+        if not self.ref_codes:
+            logger.error("No reference codes loaded. Cannot generate audio.")
+            return
+        
+        import time
+        start_time = time.time()
+        logger.info(f"Starting streaming audio generation for text length: {len(text)}")
+        
+        def _stream_generator():
+            chunk_count = 0
+            first_chunk_time = None
+            try:
+                for chunk in self._model.infer_stream(text, self.ref_codes, self.ref_text):
+                    if chunk is None or chunk.size == 0:
+                        continue
+                    chunk_count += 1
+                    
+                    # Track time to first chunk
+                    if chunk_count == 1:
+                        first_chunk_time = time.time()
+                        ttfc = first_chunk_time - start_time
+                        logger.info(f"Time to first chunk: {ttfc:.3f}s")
+                    
+                    # Log chunk info for debugging
+                    if chunk_count <= 3:
+                        logger.info(f"Chunk {chunk_count}: shape={chunk.shape}, dtype={chunk.dtype}, "
+                                  f"min={chunk.min():.3f}, max={chunk.max():.3f}")
+                    
+                    # Convert float32 [-1, 1] to int16 PCM (same as example code)
+                    audio_int16 = (chunk * 32767).astype(np.int16)
+                    
+                    # Return 16-bit PCM data
+                    yield audio_int16.tobytes()
+                
+                total_time = time.time() - start_time
+                avg_chunk_time = (time.time() - first_chunk_time) / chunk_count if first_chunk_time else 0
+                logger.info(f"Finished streaming {chunk_count} chunks in {total_time:.3f}s "
+                          f"(avg: {avg_chunk_time:.3f}s/chunk)")
+                
+            except Exception as e:
+                logger.error(f"Error during streaming audio generation: {e}")
+        
+        # Stream chunks in executor to avoid blocking
+        loop = asyncio.get_running_loop()
+        gen = _stream_generator()
+        
+        while True:
+            try:
+                chunk = await loop.run_in_executor(None, lambda: next(gen, None))
+                if chunk is None:
+                    break
+                yield chunk
+            except StopIteration:
+                break
+            except Exception as e:
+                logger.error(f"Error streaming chunk: {e}")
+                break
 
 # Create global instance
 neurtts_factory = NeurTTSFactory()

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, delete, select
@@ -221,6 +222,78 @@ def build_chat_router(
             if isinstance(e, HTTPException):
                 raise e
             raise HTTPException(status_code=500, detail=f"Voice processing failed: {e}")
+    
+    @router.post("/voice/stream")
+    async def voice_chat_stream(
+        file: UploadFile = File(...),
+        user: User = Depends(get_current_user),
+    ):
+        """
+        Voice chat endpoint with streaming audio response.
+        Returns audio chunks as they're generated for lower latency.
+        """
+        try:
+            # 1. Save upload to temporary file
+            suffix = os.path.splitext(file.filename)[1] if file.filename else ".wav"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                content = await file.read()
+                tmp.write(content)
+                tmp_path = tmp.name
+
+            try:
+                # 2. Transcribe using factory
+                segments, info = whisper_factory.transcribe(tmp_path, beam_size=5)
+                
+                # Collect all segments
+                transcribed_text = " ".join([segment.text for segment in segments]).strip()
+                logger.info(f"Transcribed audio: {transcribed_text} (language: {info.language}, prob: {info.language_probability})")
+                
+                if not transcribed_text:
+                    raise HTTPException(status_code=400, detail="Could not transcribe audio")
+
+                # 3. Process as chat
+                result = await _process_chat_core(
+                    text_input=transcribed_text,
+                    user=user,
+                    new_session=False,
+                    session_id=None
+                )
+                
+                # 4. Stream speech response
+                response_text = result["response"]["content"]
+                if not response_text:
+                    raise HTTPException(status_code=500, detail="No response generated")
+                
+                # Stream audio chunks as they're generated
+                async def audio_generator():
+                    async for chunk in neurtts_factory.generate_audio_stream(response_text):
+                        yield chunk
+                
+                return StreamingResponse(
+                    audio_generator(),
+                    media_type="application/octet-stream",  # Raw PCM data
+                    headers={
+                        "X-Session-ID": str(result["session_id"]),
+                        "X-Message-ID": str(result["message_id"]),
+                        "X-Transcribed-Text": transcribed_text,
+                        "X-Audio-Format": "pcm16",  # 16-bit PCM
+                        "X-Audio-Sample-Rate": "24000",
+                        "X-Audio-Channels": "1",
+                        "Cache-Control": "no-cache",
+                        "X-Accel-Buffering": "no",  # Disable nginx buffering if present
+                    }
+                )
+                
+            finally:
+                # Cleanup temp file
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                    
+        except Exception as e:
+            logger.error(f"Voice streaming failed: {e}")
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(status_code=500, detail=f"Voice streaming failed: {e}")
 
     @router.get("/history")
     async def get_chat_history(
