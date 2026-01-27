@@ -111,7 +111,7 @@ function App() {
   const [nukeMemoriesProgress, setNukeMemoriesProgress] = useState(0);
   const nukeMemoriesTimerRef = useRef<number | null>(null);
 
-  const [editingMemory, setEditingMemory] = useState(null);
+  const [editingMemory, setEditingMemory] = useState<{id: number, content: string, kind: string, created_at: string} | null>(null);
   const [editMemoryContent, setEditMemoryContent] = useState('');
   const [editMemoryKind, setEditMemoryKind] = useState('fact');
 
@@ -121,7 +121,7 @@ function App() {
   const [newAgentPrompt, setNewAgentPrompt] = useState('');
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
 
-  const [editingAgent, setEditingAgent] = useState(null);
+  const [editingAgent, setEditingAgent] = useState<{id: number, name: string, prompt: string, created_at?: string} | null>(null);
   const [editAgentName, setEditAgentName] = useState('');
   const [editAgentPrompt, setEditAgentPrompt] = useState('');
 
@@ -131,7 +131,7 @@ function App() {
   const [newGuardrailPrompt, setNewGuardrailPrompt] = useState('');
   const [isCreatingGuardrail, setIsCreatingGuardrail] = useState(false);
 
-  const [editingGuardrail, setEditingGuardrail] = useState(null);
+  const [editingGuardrail, setEditingGuardrail] = useState<{id: number, name: string, prompt: string, created_at?: string} | null>(null);
   const [editGuardrailName, setEditGuardrailName] = useState('');
   const [editGuardrailPrompt, setEditGuardrailPrompt] = useState('');
 
@@ -139,6 +139,7 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
 
   // Check valid token on load (optional: verify with backend)
   useEffect(() => {
@@ -319,7 +320,7 @@ function App() {
 
   const handleUpdateMemory = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editMemoryContent.trim()) return;
+    if (!editMemoryContent.trim() || !editingMemory) return;
 
     try {
         const res = await fetch(`/api/memories/${editingMemory.id}`, {
@@ -398,7 +399,7 @@ function App() {
   
     const handleUpdateAgent = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!editAgentName.trim() || !editAgentPrompt.trim()) return;
+      if (!editAgentName.trim() || !editAgentPrompt.trim() || !editingAgent) return;
   
       try {
           const res = await fetch(`/api/agents/${editingAgent.id}`, {
@@ -476,7 +477,7 @@ function App() {
   
     const handleUpdateGuardrail = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!editGuardrailName.trim() || !editGuardrailPrompt.trim()) return;
+      if (!editGuardrailName.trim() || !editGuardrailPrompt.trim() || !editingGuardrail) return;
   
       try {
           const res = await fetch(`/api/guardrails/${editingGuardrail.id}`, {
@@ -849,6 +850,7 @@ const stopRecording = async () => {
     mediaRecorderRef.current.onstop = async () => {
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/wav' });
         setIsRecording(false);
+        setIsVoiceProcessing(true);
         
         // Send to backend
         const formData = new FormData();
@@ -977,6 +979,7 @@ const stopRecording = async () => {
                                     }
                                 }
                                 console.log(`Streaming complete. Played ${chunkCount} chunks.`);
+                                setIsVoiceProcessing(false);
                                 break;
                             }
                             
@@ -1020,6 +1023,7 @@ const stopRecording = async () => {
                         
                     } catch (e) {
                         console.error("Error processing streaming audio:", e);
+                        setIsVoiceProcessing(false);
                     }
                 }
 
@@ -1027,9 +1031,11 @@ const stopRecording = async () => {
                 
             } else {
                 console.error("Voice processing failed:", res.status, res.statusText);
+                setIsVoiceProcessing(false);
             }
         } catch (e) {
             console.error("Voice processing error:", e);
+            setIsVoiceProcessing(false);
         }
         
         // Stop all tracks
@@ -1163,6 +1169,7 @@ const stopRecording = async () => {
                             pulseSpeed={10}
                             particleShape="sphere"
                             fieldStrength={10}
+                            isProcessing={isVoiceProcessing}
                         />
                     </div>
                     
