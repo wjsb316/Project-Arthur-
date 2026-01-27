@@ -271,12 +271,12 @@ def build_chat_router(
                 
                 return StreamingResponse(
                     audio_generator(),
-                    media_type="application/octet-stream",  # Raw PCM data
+                    media_type="application/octet-stream",
                     headers={
                         "X-Session-ID": str(result["session_id"]),
                         "X-Message-ID": str(result["message_id"]),
                         "X-Transcribed-Text": transcribed_text,
-                        "X-Audio-Format": "pcm16",  # 16-bit PCM
+                        "X-Audio-Format": "pcm16-length-prefixed",  # 4-byte uint32 LE length + PCM data
                         "X-Audio-Sample-Rate": "24000",
                         "X-Audio-Channels": "1",
                         "Cache-Control": "no-cache",

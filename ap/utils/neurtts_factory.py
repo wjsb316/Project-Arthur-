@@ -58,15 +58,22 @@ class NeurTTSFactory:
 
             logger.info("Initializing NeuTTS with GGUF+CUDA acceleration...")
             
-
+            # Streaming chunks optimized
             self._model = NeuTTSAir(
-                backbone_repo="neuphonic/neutts-nano-q8-gguf",  # GGUF for llama.cpp
-                backbone_device="cuda",  # ⚠️ MUST be "gpu" or "cuda" to enable GPU offloading!
-                codec_repo="neuphonic/neucodec-onnx-decoder",  # ONNX decoder
-                codec_device="cpu",  # ONNX on CPU is fast enough
-                # codec_repo="neuphonic/neucodec",  # ONNX decoder
-                # codec_device="cuda",  # ONNX on CPU is fast enough
+                backbone_repo="neuphonic/neutts-nano-q8-gguf",  # GGUF for streaming chunks
+                backbone_device="cuda",
+                codec_repo="neuphonic/neucodec-onnx-decoder",
+                codec_device="cpu",  # ONNX on CPU requred for chunks streaming
             )
+            
+            # # Transmission of wav file
+            # self._model = NeuTTSAir(
+            #     backbone_repo="neuphonic/neutts-air",
+            #     backbone_device="cuda",
+            #     codec_repo="neuphonic/neucodec",
+            #     codec_device="cuda",
+            # )
+
             
             logger.info("GGUF model initialized with full GPU offloading (n_gpu_layers=-1)")
             
@@ -182,9 +189,14 @@ class NeurTTSFactory:
     
     async def generate_audio_stream(self, text: str):
         """
-        Synthesize speech from text and yield raw PCM audio chunks as they're generated.
-        Yields 16-bit PCM data at 24kHz, mono.
-        Client should use Web Audio API to play these chunks directly.
+        Synthesize speech from text and yield length-prefixed PCM audio chunks.
+        
+        Each yielded message is:
+          - 4 bytes: uint32 little-endian length of PCM data
+          - N bytes: 16-bit PCM audio data at 24kHz, mono
+        
+        This framing allows the client to reconstruct chunk boundaries
+        that would otherwise be lost in HTTP chunked transfer encoding.
         """
         if not text:
             return
@@ -207,6 +219,7 @@ class NeurTTSFactory:
             return
         
         import time
+        import struct
         start_time = time.time()
         logger.info(f"Starting streaming audio generation for text length: {len(text)}")
         
@@ -228,13 +241,15 @@ class NeurTTSFactory:
                     # Log chunk info for debugging
                     if chunk_count <= 3:
                         logger.info(f"Chunk {chunk_count}: shape={chunk.shape}, dtype={chunk.dtype}, "
-                                  f"min={chunk.min():.3f}, max={chunk.max():.3f}")
+                                  f"min={chunk.min():.3f}, max={chunk.max():.3f}, samples={chunk.size}")
                     
                     # Convert float32 [-1, 1] to int16 PCM (same as example code)
                     audio_int16 = (chunk * 32767).astype(np.int16)
+                    pcm_bytes = audio_int16.tobytes()
                     
-                    # Return 16-bit PCM data
-                    yield audio_int16.tobytes()
+                    # Prefix with 4-byte length (uint32 little-endian)
+                    length_prefix = struct.pack('<I', len(pcm_bytes))
+                    yield length_prefix + pcm_bytes
                 
                 total_time = time.time() - start_time
                 avg_chunk_time = (time.time() - first_chunk_time) / chunk_count if first_chunk_time else 0

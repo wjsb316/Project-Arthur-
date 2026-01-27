@@ -723,6 +723,7 @@ const stopRecording = async () => {
                 console.log("Transcribed:", transcribedText);
 
                 // Stream audio response - play chunks as they arrive
+                // Backend sends length-prefixed chunks: 4 bytes (uint32 LE) + N bytes PCM
                 if (res.body) {
                     try {
                         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -732,20 +733,26 @@ const stopRecording = async () => {
                         let nextStartTime = 0;
                         let chunkCount = 0;
                         let playbackStarted = false;
-                        const bufferChunks = 1; // Buffer only 1 chunk before starting (nano model is fast)
+                        const bufferChunks = 1; // Buffer 2 chunks before starting for smoother playback
                         const bufferedAudioBuffers: AudioBuffer[] = [];
                         
-                        console.log("Starting audio stream playback...");
+                        // Buffer for accumulating incoming bytes (HTTP may split/combine chunks)
+                        let pendingBytes = new Uint8Array(0);
                         
-                        const createAudioBuffer = (value: Uint8Array): AudioBuffer | null => {
+                        console.log("Starting audio stream playback with length-prefixed framing...");
+                        
+                        const createAudioBuffer = (pcmData: Uint8Array): AudioBuffer | null => {
                             // Ensure the byte length is a multiple of 2 (int16 size)
-                            if (value.length % 2 !== 0) {
-                                console.warn(`Chunk has invalid length: ${value.length} bytes (not multiple of 2)`);
+                            if (pcmData.length % 2 !== 0) {
+                                console.warn(`PCM data has invalid length: ${pcmData.length} bytes (not multiple of 2)`);
                                 return null;
                             }
                             
                             // Convert int16 PCM to float32 for Web Audio API
-                            const int16Array = new Int16Array(value.buffer, value.byteOffset, value.byteLength / 2);
+                            // Need to create a properly aligned view
+                            const alignedBuffer = new ArrayBuffer(pcmData.length);
+                            new Uint8Array(alignedBuffer).set(pcmData);
+                            const int16Array = new Int16Array(alignedBuffer);
                             const float32Array = new Float32Array(int16Array.length);
                             
                             // Convert int16 [-32768, 32767] to float32 [-1.0, 1.0]
@@ -771,7 +778,34 @@ const stopRecording = async () => {
                             nextStartTime = startTime + audioBuffer.duration;
                             
                             chunkCount++;
-                            console.log(`Chunk ${chunkCount}: Scheduled at ${startTime.toFixed(3)}s (now: ${now.toFixed(3)}s, duration: ${audioBuffer.duration.toFixed(3)}s)`);
+                            if (chunkCount <= 5 || chunkCount % 10 === 0) {
+                                console.log(`Chunk ${chunkCount}: ${audioBuffer.length} samples, duration ${audioBuffer.duration.toFixed(3)}s`);
+                            }
+                        };
+                        
+                        // Extract complete audio chunks from the buffer using length prefixes
+                        const processBuffer = () => {
+                            const chunks: Uint8Array[] = [];
+                            
+                            while (pendingBytes.length >= 4) {
+                                // Read length prefix (uint32 little-endian)
+                                const dataView = new DataView(pendingBytes.buffer, pendingBytes.byteOffset, 4);
+                                const chunkLength = dataView.getUint32(0, true); // little-endian
+                                
+                                // Check if we have the complete chunk
+                                if (pendingBytes.length < 4 + chunkLength) {
+                                    break; // Wait for more data
+                                }
+                                
+                                // Extract the PCM data (skip 4-byte length prefix)
+                                const pcmData = pendingBytes.slice(4, 4 + chunkLength);
+                                chunks.push(pcmData);
+                                
+                                // Remove processed bytes from buffer
+                                pendingBytes = pendingBytes.slice(4 + chunkLength);
+                            }
+                            
+                            return chunks;
                         };
                         
                         // Read and play chunks as they arrive
@@ -779,33 +813,52 @@ const stopRecording = async () => {
                             const { done, value } = await reader.read();
                             
                             if (done) {
+                                // Process any remaining data
+                                const finalChunks = processBuffer();
+                                for (const pcmData of finalChunks) {
+                                    const audioBuffer = createAudioBuffer(pcmData);
+                                    if (audioBuffer) {
+                                        scheduleAudioBuffer(audioBuffer);
+                                    }
+                                }
                                 console.log(`Streaming complete. Played ${chunkCount} chunks.`);
                                 break;
                             }
                             
                             if (value && value.length > 0) {
-                                const audioBuffer = createAudioBuffer(value);
-                                if (!audioBuffer) continue;
+                                // Append new data to pending buffer
+                                const newBuffer = new Uint8Array(pendingBytes.length + value.length);
+                                newBuffer.set(pendingBytes);
+                                newBuffer.set(value, pendingBytes.length);
+                                pendingBytes = newBuffer;
                                 
-                                if (!playbackStarted) {
-                                    // Buffer initial chunks
-                                    bufferedAudioBuffers.push(audioBuffer);
-                                    console.log(`Buffering chunk ${bufferedAudioBuffers.length}/${bufferChunks}...`);
+                                // Extract and play complete chunks
+                                const completeChunks = processBuffer();
+                                
+                                for (const pcmData of completeChunks) {
+                                    const audioBuffer = createAudioBuffer(pcmData);
+                                    if (!audioBuffer) continue;
                                     
-                                    if (bufferedAudioBuffers.length >= bufferChunks) {
-                                        // Start playback - schedule all buffered chunks
-                                        playbackStarted = true;
-                                        nextStartTime = audioContext.currentTime + 0.1;
-                                        console.log(`Starting playback at ${nextStartTime.toFixed(3)}s`);
+                                    if (!playbackStarted) {
+                                        // Buffer initial chunks for smoother start
+                                        bufferedAudioBuffers.push(audioBuffer);
+                                        console.log(`Buffering chunk ${bufferedAudioBuffers.length}/${bufferChunks}...`);
                                         
-                                        for (const buf of bufferedAudioBuffers) {
-                                            scheduleAudioBuffer(buf);
+                                        if (bufferedAudioBuffers.length >= bufferChunks) {
+                                            // Start playback - schedule all buffered chunks
+                                            playbackStarted = true;
+                                            nextStartTime = audioContext.currentTime + 0.05;
+                                            console.log(`Starting playback at ${nextStartTime.toFixed(3)}s`);
+                                            
+                                            for (const buf of bufferedAudioBuffers) {
+                                                scheduleAudioBuffer(buf);
+                                            }
+                                            bufferedAudioBuffers.length = 0;
                                         }
-                                        bufferedAudioBuffers.length = 0;
+                                    } else {
+                                        // Playback already started, schedule immediately
+                                        scheduleAudioBuffer(audioBuffer);
                                     }
-                                } else {
-                                    // Playback already started, schedule immediately
-                                    scheduleAudioBuffer(audioBuffer);
                                 }
                             }
                         }
