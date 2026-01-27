@@ -41,6 +41,12 @@ const IconAgents = () => (
   </svg>
 );
 
+const IconGuardrails = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+  </svg>
+);
+
 const IconBrain = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"></path>
@@ -89,7 +95,7 @@ const TypingIndicator = () => (
 
 function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'history' | 'agents' | 'memories' | 'settings' | 'voice'>('login');
+  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'history' | 'agents' | 'guardrails' | 'memories' | 'settings' | 'voice'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -110,6 +116,12 @@ function App() {
   const [newAgentName, setNewAgentName] = useState('');
   const [newAgentPrompt, setNewAgentPrompt] = useState('');
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+
+  // Guardrails State
+  const [guardrails, setGuardrails] = useState<Array<{id: number, name: string, prompt: string, created_at?: string}>>([]);
+  const [newGuardrailName, setNewGuardrailName] = useState('');
+  const [newGuardrailPrompt, setNewGuardrailPrompt] = useState('');
+  const [isCreatingGuardrail, setIsCreatingGuardrail] = useState(false);
 
   // Voice State
   const [isRecording, setIsRecording] = useState(false);
@@ -165,6 +177,9 @@ function App() {
     }
     if (view === 'agents' && token) {
         fetchAgents();
+    }
+    if (view === 'guardrails' && token) {
+        fetchGuardrails();
     }
     if (view === 'memories' && token) {
         fetchMemories();
@@ -339,6 +354,59 @@ function App() {
               }
           });
           if (res.ok) fetchAgents();
+      } catch (e) {
+          console.error(e);
+      }
+  };
+
+  const fetchGuardrails = () => {
+    fetch('/api/guardrails/', { 
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            ...API_HEADERS
+        }
+    })
+    .then(res => res.json())
+    .then(data => setGuardrails(data))
+    .catch(console.error);
+  };
+
+  const handleCreateGuardrail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGuardrailName.trim() || !newGuardrailPrompt.trim()) return;
+
+    try {
+        const res = await fetch('/api/guardrails/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                ...API_HEADERS
+            },
+            body: JSON.stringify({ name: newGuardrailName, prompt: newGuardrailPrompt })
+        });
+        if (res.ok) {
+            setNewGuardrailName('');
+            setNewGuardrailPrompt('');
+            setIsCreatingGuardrail(false);
+            fetchGuardrails();
+        }
+    } catch (e) {
+        console.error(e);
+    }
+  };
+
+  const handleDeleteGuardrail = async (id: number) => {
+      if(!confirm("Delete this guardrail?")) return;
+      try {
+          const res = await fetch(`/api/guardrails/${id}`, {
+              method: 'DELETE',
+              headers: {
+                  'Authorization': `Bearer ${token}`,
+                  ...API_HEADERS
+              }
+          });
+          if (res.ok) fetchGuardrails();
       } catch (e) {
           console.error(e);
       }
@@ -884,7 +952,7 @@ const stopRecording = async () => {
     mediaRecorderRef.current.stop();
 };
 
-  if (['dashboard', 'history', 'agents', 'memories', 'settings', 'voice'].includes(view)) {
+  if (['dashboard', 'history', 'agents', 'guardrails', 'memories', 'settings', 'voice'].includes(view)) {
     return (
       <div className="app-layout">
         <header className="mobile-header">
@@ -954,6 +1022,16 @@ const stopRecording = async () => {
                 >
                     <IconAgents />
                     <span>Agents</span>
+                </button>
+                <button 
+                    className={`nav-item ${view === 'guardrails' ? 'active' : ''}`}
+                    onClick={() => {
+                        setView('guardrails');
+                        setIsSidebarOpen(false);
+                    }}
+                >
+                    <IconGuardrails />
+                    <span>Guardrails</span>
                 </button>
                 <button 
                     className={`nav-item ${view === 'settings' ? 'active' : ''}`}
@@ -1447,8 +1525,88 @@ const stopRecording = async () => {
                     </div>
                 </div>
             )}
+
+            {view === 'guardrails' && (
+                <div className="guardrails-view" style={{ padding: '2rem', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                        <h2>Guardrails</h2>
+                        <button 
+                            onClick={() => setIsCreatingGuardrail(!isCreatingGuardrail)}
+                            className="primary-btn"
+                            style={{ 
+                              width: 'auto',
+                              padding: '.5rem'
+                             }}
+                        >
+                            {isCreatingGuardrail ? 'Cancel' : 'Create Guardrail'}
+                        </button>
+                    </div>
+
+                    {isCreatingGuardrail && (
+                        <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '2rem' }}>
+                            <h3>New Guardrail</h3>
+                            <form onSubmit={handleCreateGuardrail}>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Name</label>
+                                    <input 
+                                        value={newGuardrailName} 
+                                        onChange={e => setNewGuardrailName(e.target.value)} 
+                                        placeholder="e.g. Safety Filter"
+                                        style={{ background: 'white', color: '#1e293b', border: '1px solid #cbd5e1' }}
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Rule/Prompt</label>
+                                    <textarea 
+                                        value={newGuardrailPrompt} 
+                                        onChange={e => setNewGuardrailPrompt(e.target.value)} 
+                                        placeholder="Never provide harmful, illegal, or unethical advice..."
+                                        style={{ 
+                                            width: '100%', 
+                                            padding: '0.5rem', 
+                                            borderRadius: '4px', 
+                                            border: '1px solid #cbd5e1', 
+                                            minHeight: '100px',
+                                            fontFamily: 'inherit'
+                                        }}
+                                        required
+                                    />
+                                </div>
+                                <button type="submit" className="primary-btn">Save Guardrail</button>
+                            </form>
+                        </div>
+                    )}
+
+                    <div className="guardrails-list" style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                        {guardrails.map(guardrail => (
+                            <div key={guardrail.id} style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', position: 'relative' }}>
+                                <button 
+                                    onClick={() => handleDeleteGuardrail(guardrail.id)}
+                                    style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                                    title="Delete Guardrail"
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                                <h3 style={{ margin: '0 0 0.5rem 0' }}>{guardrail.name}</h3>
+                                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+                                    Created: {new Date(guardrail.created_at || Date.now()).toLocaleDateString()}
+                                </div>
+                                <div style={{ fontSize: '0.9rem', color: '#64748b', whiteSpace: 'pre-wrap', maxHeight: '150px', overflowY: 'auto' }}>
+                                    {guardrail.prompt}
+                                </div>
+                            </div>
+                        ))}
+                        {guardrails.length === 0 && !isCreatingGuardrail && (
+                            <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>
+                                No guardrails found. Create one to get started.
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
             
-            {view !== 'dashboard' && view !== 'history' && view !== 'agents' && view !== 'memories' && view !== 'voice' && (
+            {view !== 'dashboard' && view !== 'history' && view !== 'agents' && view !== 'guardrails' && view !== 'memories' && view !== 'voice' && (
                 <div className="content-placeholder">
                     <h2>{view.charAt(0).toUpperCase() + view.slice(1)}</h2>
                     {view === 'settings' && (

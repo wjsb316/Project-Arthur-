@@ -98,3 +98,9 @@ async def init_db():
                     embedding float[256]
                 );
             """))
+            await conn.execute(text("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS guardrail_vectors USING vec0(
+                    id INTEGER PRIMARY KEY,
+                    embedding float[256]
+                );
+            """))

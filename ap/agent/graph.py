@@ -17,8 +17,10 @@ from sqlalchemy import select
 
 from ..memory.store import MemoryEntry, MemoryStore
 from ..persistence.chat import ChatStore
+from ..persistence.retrieval import VectorRetriever
 from ..models.chat import ChatMessage
 from ..models.agents import Agent
+from ..models.guardrails import Guardrail
 from ..database import get_session_maker
 from ..models import ModelProvider, ProviderHealth
 from ..personal_brain import PersonalBrain
@@ -209,6 +211,7 @@ class AgentState(TypedDict):
     memories: List[MemoryEntry]
     chat_history: List[dict]
     agents: List[dict]
+    guardrails: List[dict]
     
     # Final output
     final_prompt: str
@@ -261,26 +264,58 @@ async def retrieve_agents(state: AgentState) -> dict:
         return {"agents": []}
 
 
+async def retrieve_guardrails(state: AgentState) -> dict:
+    """Node: Retrieve relevant guardrails for the user using vector search."""
+    try:
+        session_factory = get_session_maker()
+        retriever = VectorRetriever(session_factory)
+        
+        # Use vector search to find relevant guardrails based on user input
+        vector_results = await retriever.retrieve_by_similarity(
+            query=state["user_input"],
+            user_id=state["user_id"],
+            table_name="guardrails",
+            vector_table_name="guardrail_vectors",
+            limit=5
+        )
+        
+        # Convert results to guardrail dicts
+        guardrails_data = [
+            {"name": r.get("name", ""), "prompt": r.get("prompt", "")} 
+            for r in vector_results
+        ]
+        
+        return {"guardrails": guardrails_data}
+    except Exception as e:
+        logger.error(f"Guardrail retrieval failed: {e}")
+        return {"guardrails": []}
+
+
 def bundle_context(state: AgentState) -> dict:
     """Node: Format all context into a final prompt string."""
     parts = []
     
-    # 1. Format Agents
+    # 1. Format Guardrails (these are constraints/rules that guide behavior)
+    if state.get("guardrails"):
+        guardrail_text = "\n".join([f"- {g['name']}: {g['prompt']}" for g in state["guardrails"]])
+        parts.append(f"Active Guardrails (IMPORTANT - Follow these rules):\n{guardrail_text}")
+    
+    # 2. Format Agents
     if state.get("agents"):
         agent_text = "\n".join([f"Agent {a['name']}: {a['prompt']}" for a in state["agents"]])
         parts.append(f"Available Agents:\n{agent_text}")
 
-    # 2. Format Memories
+    # 3. Format Memories
     if state.get("memories"):
         mem_text = "\n".join([f"- ({m.kind}) {m.content}" for m in state["memories"]])
         parts.append(f"Relevant Memories:\n{mem_text}")
     
-    # 3. Format Chat History
+    # 4. Format Chat History
     if state.get("chat_history"):
         hist_text = "\n".join([f"- {m.get('role', 'unknown')}: {m.get('content', '')}" for m in state["chat_history"]])
         parts.append(f"Relevant Chat History:\n{hist_text}")
     
-    # 4. Add User Input
+    # 5. Add User Input
     parts.append(f"User: {state['user_input']}")
     
     final_prompt = "\n\n".join(parts)
@@ -340,6 +375,9 @@ def build_agent_graph(
     async def _retrieve_agents_node(state: AgentState):
         return await retrieve_agents(state)
 
+    async def _retrieve_guardrails_node(state: AgentState):
+        return await retrieve_guardrails(state)
+
     def _generate_response_node(state: AgentState):
         return generate_response(
             state, 
@@ -355,16 +393,18 @@ def build_agent_graph(
     workflow.add_node("retrieve_memories", _retrieve_memories_node)
     workflow.add_node("retrieve_history", _retrieve_history_node)
     workflow.add_node("retrieve_agents", _retrieve_agents_node)
+    workflow.add_node("retrieve_guardrails", _retrieve_guardrails_node)
     workflow.add_node("bundle", bundle_context)
     workflow.add_node("generate", _generate_response_node)
     
     # Start -> Parallel Retrieval
     workflow.set_entry_point("retrieve_memories")
     
-    # Sequential Chain
+    # Sequential Chain (retrieval nodes -> bundle -> generate)
     workflow.add_edge("retrieve_memories", "retrieve_history")
     workflow.add_edge("retrieve_history", "retrieve_agents")
-    workflow.add_edge("retrieve_agents", "bundle")
+    workflow.add_edge("retrieve_agents", "retrieve_guardrails")
+    workflow.add_edge("retrieve_guardrails", "bundle")
     workflow.add_edge("bundle", "generate")
     workflow.add_edge("generate", END)
     

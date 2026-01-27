@@ -14,6 +14,7 @@ from .ingress.professional import build_professional_router
 from .ingress.auth import build_auth_router
 from .ingress.chat import build_chat_router
 from .ingress.agents import build_agents_router
+from .ingress.guardrails import build_guardrails_router
 from .ingress.memories import router as memories_router
 from .logging_config import configure_logging
 from .memory import MemoryStore
@@ -108,6 +109,7 @@ def create_app(
     application.include_router(build_auth_router()) # No repo arg needed, uses dependency
     application.include_router(build_chat_router(provider, memory, personal, audit))
     application.include_router(build_agents_router())
+    application.include_router(build_guardrails_router())
     application.include_router(memories_router)
 
     from .ingress.audit import build_audit_router  # local import to avoid cycle
