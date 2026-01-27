@@ -55,34 +55,17 @@ class NeurTTSFactory:
         init_start = time.time()
         logger.info("Initializing NeurTTS-Air model (this may take time on first run for model download)...")
         try:
-            # Model configuration
-            # backbone = "neuphonic/neutts-nano"
-            # backbone = "neuphonic/neutts-air"
-            # codec = "neuphonic/neucodec-onnx-decoder"
-            
-            # self._model = NeuTTSAir(
-            #     backbone_repo=backbone,
-            #     backbone_device=None, # Auto-detect
-            #     codec_repo=codec,
-            #     codec_device="cpu" # ONNX usually CPU
-            # )
 
-
-            # Use GGUF model with llama.cpp CUDA backend for maximum GPU acceleration
-            # GPU: 19,268 tokens/s vs CPU: 221 tokens/s (87x speedup!)
-            # GGUF models use llama-cpp-python (compiled with CUDA in Dockerfile)
             logger.info("Initializing NeuTTS with GGUF+CUDA acceleration...")
             
-            # Use GGUF model with llama.cpp GPU acceleration
-            # Setting backbone_device="gpu" triggers n_gpu_layers=-1 internally
-            # This achieves the benchmark speed: 19,268 tokens/s (87x faster than CPU!)
+
             self._model = NeuTTSAir(
                 backbone_repo="neuphonic/neutts-nano-q8-gguf",  # GGUF for llama.cpp
                 backbone_device="cuda",  # ⚠️ MUST be "gpu" or "cuda" to enable GPU offloading!
-                # codec_repo="neuphonic/neucodec-onnx-decoder",  # ONNX decoder
-                # codec_device="cpu",  # ONNX on CPU is fast enough
-                codec_repo="neuphonic/neucodec",  # ONNX decoder
-                codec_device="cuda",  # ONNX on CPU is fast enough
+                codec_repo="neuphonic/neucodec-onnx-decoder",  # ONNX decoder
+                codec_device="cpu",  # ONNX on CPU is fast enough
+                # codec_repo="neuphonic/neucodec",  # ONNX decoder
+                # codec_device="cuda",  # ONNX on CPU is fast enough
             )
             
             logger.info("GGUF model initialized with full GPU offloading (n_gpu_layers=-1)")
