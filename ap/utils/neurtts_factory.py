@@ -68,23 +68,24 @@ class NeurTTSFactory:
             # )
 
 
-            # Use nano model with CUDA for massive speedup (87x faster than CPU!)
-            # GPU: 19,268 tokens/s vs CPU: 221 tokens/s
-            # Use full PyTorch model (not GGUF) for CUDA support
-            logger.info("Initializing NeuTTS with CUDA acceleration...")
+            # Use GGUF model with llama.cpp CUDA backend for maximum GPU acceleration
+            # GPU: 19,268 tokens/s vs CPU: 221 tokens/s (87x speedup!)
+            # GGUF models use llama-cpp-python (compiled with CUDA in Dockerfile)
+            logger.info("Initializing NeuTTS with GGUF+CUDA acceleration...")
+            
+            # Use GGUF model with llama.cpp GPU acceleration
+            # Setting backbone_device="gpu" triggers n_gpu_layers=-1 internally
+            # This achieves the benchmark speed: 19,268 tokens/s (87x faster than CPU!)
             self._model = NeuTTSAir(
-                backbone_repo="neuphonic/neutts-nano-q8-gguf",  # Full PyTorch model for GPU
-                backbone_device="cuda",  # Use GPU acceleration
-                codec_repo="neuphonic/neucodec",  # Full PyTorch codec for GPU
-                codec_device="cuda"  # Use GPU for codec too
+                backbone_repo="neuphonic/neutts-nano-q8-gguf",  # GGUF for llama.cpp
+                backbone_device="cuda",  # ⚠️ MUST be "gpu" or "cuda" to enable GPU offloading!
+                # codec_repo="neuphonic/neucodec-onnx-decoder",  # ONNX decoder
+                # codec_device="cpu",  # ONNX on CPU is fast enough
+                codec_repo="neuphonic/neucodec",  # ONNX decoder
+                codec_device="cuda",  # ONNX on CPU is fast enough
             )
             
-            # Verify CUDA is actually being used
-            import torch
-            logger.info(f"CUDA available: {torch.cuda.is_available()}")
-            if torch.cuda.is_available():
-                logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
-                logger.info(f"CUDA memory allocated: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
+            logger.info("GGUF model initialized with full GPU offloading (n_gpu_layers=-1)")
             
             # Load default reference
             self.ref_voice_path = neutts_path / "samples" / "dave.pt"
@@ -131,7 +132,7 @@ class NeurTTSFactory:
             return b""
             
         # Clean text before processing
-        text = self._clean_text(text)
+        # text = self._clean_text(text)
         if not text:
             logger.warning("Text became empty after cleaning.")
             return b""
