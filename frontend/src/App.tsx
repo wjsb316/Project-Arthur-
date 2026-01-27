@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic } from 'lucide-react';
+import { Send, Mic, Pencil } from 'lucide-react';
 import './App.css';
 import Antigravity from './Antigravity';
 
@@ -111,17 +111,29 @@ function App() {
   const [nukeMemoriesProgress, setNukeMemoriesProgress] = useState(0);
   const nukeMemoriesTimerRef = useRef<number | null>(null);
 
+  const [editingMemory, setEditingMemory] = useState(null);
+  const [editMemoryContent, setEditMemoryContent] = useState('');
+  const [editMemoryKind, setEditMemoryKind] = useState('fact');
+
   // Agents State
   const [agents, setAgents] = useState<Array<{id: number, name: string, prompt: string, created_at?: string}>>([]);
   const [newAgentName, setNewAgentName] = useState('');
   const [newAgentPrompt, setNewAgentPrompt] = useState('');
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
 
+  const [editingAgent, setEditingAgent] = useState(null);
+  const [editAgentName, setEditAgentName] = useState('');
+  const [editAgentPrompt, setEditAgentPrompt] = useState('');
+
   // Guardrails State
   const [guardrails, setGuardrails] = useState<Array<{id: number, name: string, prompt: string, created_at?: string}>>([]);
   const [newGuardrailName, setNewGuardrailName] = useState('');
   const [newGuardrailPrompt, setNewGuardrailPrompt] = useState('');
   const [isCreatingGuardrail, setIsCreatingGuardrail] = useState(false);
+
+  const [editingGuardrail, setEditingGuardrail] = useState(null);
+  const [editGuardrailName, setEditGuardrailName] = useState('');
+  const [editGuardrailPrompt, setEditGuardrailPrompt] = useState('');
 
   // Voice State
   const [isRecording, setIsRecording] = useState(false);
@@ -305,6 +317,31 @@ function App() {
       }
   };
 
+  const handleUpdateMemory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editMemoryContent.trim()) return;
+
+    try {
+        const res = await fetch(`/api/memories/${editingMemory.id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                ...API_HEADERS
+            },
+            body: JSON.stringify({ content: editMemoryContent, kind: editMemoryKind })
+        });
+        if (res.ok) {
+            setEditingMemory(null);
+            setEditMemoryContent('');
+            setEditMemoryKind('fact');
+              fetchMemories();
+          }
+      } catch (e) {
+          console.error(e);
+      }
+  };
+
   const fetchAgents = () => {
     // The router prefix is /api/agents
     fetch('/api/agents/', { 
@@ -354,6 +391,31 @@ function App() {
               }
           });
           if (res.ok) fetchAgents();
+        } catch (e) {
+            console.error(e);
+        }
+    };
+  
+    const handleUpdateAgent = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!editAgentName.trim() || !editAgentPrompt.trim()) return;
+  
+      try {
+          const res = await fetch(`/api/agents/${editingAgent.id}`, {
+              method: 'PUT',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`,
+                  ...API_HEADERS
+              },
+              body: JSON.stringify({ name: editAgentName, prompt: editAgentPrompt })
+          });
+          if (res.ok) {
+              setEditingAgent(null);
+              setEditAgentName('');
+              setEditAgentPrompt('');
+              fetchAgents();
+          }
       } catch (e) {
           console.error(e);
       }
@@ -407,6 +469,31 @@ function App() {
               }
           });
           if (res.ok) fetchGuardrails();
+        } catch (e) {
+            console.error(e);
+        }
+    };
+  
+    const handleUpdateGuardrail = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!editGuardrailName.trim() || !editGuardrailPrompt.trim()) return;
+  
+      try {
+          const res = await fetch(`/api/guardrails/${editingGuardrail.id}`, {
+              method: 'PUT',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`,
+                  ...API_HEADERS
+              },
+              body: JSON.stringify({ name: editGuardrailName, prompt: editGuardrailPrompt })
+          });
+          if (res.ok) {
+              setEditingGuardrail(null);
+              setEditGuardrailName('');
+              setEditGuardrailPrompt('');
+              fetchGuardrails();
+          }
       } catch (e) {
           console.error(e);
       }
@@ -1391,6 +1478,51 @@ const stopRecording = async () => {
                         </div>
                     )}
 
+{editingMemory && (
+                        <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '2rem' }}>
+                            <h3>Edit Memory</h3>
+                            <form onSubmit={handleUpdateMemory}>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Type</label>
+                                    <select
+                                        value={editMemoryKind}
+                                        onChange={e => setEditMemoryKind(e.target.value)}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.5rem',
+                                            borderRadius: '4px',
+                                            border: '1px solid #cbd5e1',
+                                            background: 'white',
+                                            color: '#1e293b',
+                                            marginBottom: '1rem'
+                                        }}
+                                    >
+                                        <option value="fact">Fact</option>
+                                        <option value="episode">Episode</option>
+                                        <option value="open_loop">Open Loop</option>
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Content</label>
+                                    <textarea 
+                                        value={editMemoryContent} 
+                                        onChange={e => setEditMemoryContent(e.target.value)} 
+                                        style={{ 
+                                            width: '100%', 
+                                            padding: '0.5rem', 
+                                            borderRadius: '4px', 
+                                            border: '1px solid #cbd5e1', 
+                                            minHeight: '100px',
+                                            fontFamily: 'inherit'
+                                        }}
+                                        required
+                                    />
+                                </div>
+                                <button type="submit" className="primary-btn">Update Memory</button>
+                            </form>
+                        </div>
+                    )}
+
                     <div className="memories-list" style={{ flex: 1, overflowY: 'auto' }}>
                         {filteredMemories.map((memory: any) => (
                             <div key={memory.id} style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', alignItems: 'flex-start' }}>
@@ -1400,7 +1532,18 @@ const stopRecording = async () => {
                                     onChange={() => toggleMemory(memory.id)}
                                     style={{ marginTop: '1.5rem', width: '20px', height: '20px', flexShrink: 0 }}
                                 />
-                                <div style={{ flex: 1, background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                <div style={{ flex: 1, background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', position: 'relative' }}>
+                                <button 
+                                        onClick={() => {
+                                            setEditingMemory(memory);
+                                            setEditMemoryContent(memory.content);
+                                            setEditMemoryKind(memory.kind);
+                                        }}
+                                        style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                                        title="Edit Memory"
+                                    >
+                                        <Pencil size={16} />
+                                    </button>
                                     <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
                                         {new Date(memory.created_at).toLocaleDateString()} • {memory.kind}
                                     </div>
@@ -1498,6 +1641,40 @@ const stopRecording = async () => {
                         </div>
                     )}
 
+{editingAgent && (
+                        <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '2rem' }}>
+                            <h3>Edit Agent</h3>
+                            <form onSubmit={handleUpdateAgent}>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Name</label>
+                                    <input 
+                                        value={editAgentName} 
+                                        onChange={e => setEditAgentName(e.target.value)} 
+                                        style={{ background: 'white', color: '#1e293b', border: '1px solid #cbd5e1' }}
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Prompt</label>
+                                    <textarea 
+                                        value={editAgentPrompt} 
+                                        onChange={e => setEditAgentPrompt(e.target.value)} 
+                                        style={{ 
+                                            width: '100%', 
+                                            padding: '0.5rem', 
+                                            borderRadius: '4px', 
+                                            border: '1px solid #cbd5e1', 
+                                            minHeight: '100px',
+                                            fontFamily: 'inherit'
+                                        }}
+                                        required
+                                    />
+                                </div>
+                                <button type="submit" className="primary-btn">Update Agent</button>
+                            </form>
+                        </div>
+                    )}
+
                     <div className="agents-list" style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
                         {agents.map(agent => (
                             <div key={agent.id} style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', position: 'relative' }}>
@@ -1507,6 +1684,17 @@ const stopRecording = async () => {
                                     title="Delete Agent"
                                 >
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                                <button 
+                                    onClick={() => {
+                                        setEditingAgent(agent);
+                                        setEditAgentName(agent.name);
+                                        setEditAgentPrompt(agent.prompt);
+                                    }}
+                                    style={{ position: 'absolute', top: '1rem', right: '3rem', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                                    title="Edit Agent"
+                                >
+                                    <Pencil size={16} />
                                 </button>
                                 <h3 style={{ margin: '0 0 0.5rem 0' }}>{agent.name}</h3>
                                 <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
@@ -1578,6 +1766,40 @@ const stopRecording = async () => {
                         </div>
                     )}
 
+{editingGuardrail && (
+                        <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '2rem' }}>
+                            <h3>Edit Guardrail</h3>
+                            <form onSubmit={handleUpdateGuardrail}>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Name</label>
+                                    <input 
+                                        value={editGuardrailName} 
+                                        onChange={e => setEditGuardrailName(e.target.value)} 
+                                        style={{ background: 'white', color: '#1e293b', border: '1px solid #cbd5e1' }}
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ color: '#1e293b' }}>Rule/Prompt</label>
+                                    <textarea 
+                                        value={editGuardrailPrompt} 
+                                        onChange={e => setEditGuardrailPrompt(e.target.value)} 
+                                        style={{ 
+                                            width: '100%', 
+                                            padding: '0.5rem', 
+                                            borderRadius: '4px', 
+                                            border: '1px solid #cbd5e1', 
+                                            minHeight: '100px',
+                                            fontFamily: 'inherit'
+                                        }}
+                                        required
+                                    />
+                                </div>
+                                <button type="submit" className="primary-btn">Update Guardrail</button>
+                            </form>
+                        </div>
+                    )}
+
                     <div className="guardrails-list" style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
                         {guardrails.map(guardrail => (
                             <div key={guardrail.id} style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0', position: 'relative' }}>
@@ -1587,6 +1809,17 @@ const stopRecording = async () => {
                                     title="Delete Guardrail"
                                 >
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                                <button 
+                                    onClick={() => {
+                                        setEditingGuardrail(guardrail);
+                                        setEditGuardrailName(guardrail.name);
+                                        setEditGuardrailPrompt(guardrail.prompt);
+                                    }}
+                                    style={{ position: 'absolute', top: '1rem', right: '3rem', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                                    title="Edit Guardrail"
+                                >
+                                    <Pencil size={16} />
                                 </button>
                                 <h3 style={{ margin: '0 0 0.5rem 0' }}>{guardrail.name}</h3>
                                 <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>

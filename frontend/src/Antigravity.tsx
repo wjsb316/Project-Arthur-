@@ -18,6 +18,8 @@ interface AntigravityProps {
   pulseSpeed?: number;
   particleShape?: 'capsule' | 'sphere' | 'box' | 'tetrahedron';
   fieldStrength?: number;
+  isProcessing?: boolean;  // New: Enable RGB breathing when true
+  gradientSpeed?: number;  // New: Speed of color gradient cycle (cycles/sec)
 }
 
 const AntigravityInner: React.FC<AntigravityProps> = ({
@@ -35,11 +37,14 @@ const AntigravityInner: React.FC<AntigravityProps> = ({
   depthFactor = 1,
   pulseSpeed = 3,
   particleShape = 'capsule',
-  fieldStrength = 10
+  fieldStrength = 10,
+  isProcessing = false,
+  gradientSpeed = 5
 }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const { viewport } = useThree();
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  const materialRef = useRef<THREE.MeshBasicMaterial | null>(null);
 
   const particles = useMemo(() => {
     const temp = [];
@@ -146,6 +151,16 @@ const AntigravityInner: React.FC<AntigravityProps> = ({
       mesh.setMatrixAt(i, dummy.matrix);
     });
 
+    if (isProcessing && materialRef.current) {
+      const time = state.clock.getElapsedTime() * gradientSpeed;
+      const r = Math.abs(Math.sin(time + 1.50)) * 0.70 + 0.10;
+      const g = Math.abs(Math.sin(time + 2.50)) * 0.70 + 0.10;
+      const b = Math.abs(Math.sin(time + 6.20)) * 0.70 + 0.10;
+      materialRef.current.color.setRGB(r, g, b);
+    } else if (materialRef.current) {
+      materialRef.current.color.copy(new THREE.Color(color));
+    }
+
     mesh.instanceMatrix.needsUpdate = true;
   });
 
@@ -155,7 +170,7 @@ const AntigravityInner: React.FC<AntigravityProps> = ({
       {particleShape === 'sphere' && <sphereGeometry args={[0.2, 16, 16]} />}
       {particleShape === 'box' && <boxGeometry args={[0.3, 0.3, 0.3]} />}
       {particleShape === 'tetrahedron' && <tetrahedronGeometry args={[0.3]} />}
-      <meshBasicMaterial color={color} />
+      <meshBasicMaterial ref={materialRef} color={color} />
     </instancedMesh>
   );
 };

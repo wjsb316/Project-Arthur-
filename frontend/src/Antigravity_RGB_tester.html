@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RGB Cycle Tester</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2rem;
+            color: #fff;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 30px;
+            align-items: start;
+        }
+        
+        .preview-section {
+            background: #2a2a2a;
+            border-radius: 12px;
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .color-display {
+            width: 100%;
+            height: 300px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            transition: background-color 0.016s linear;
+        }
+        
+        .rgb-values {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            width: 100%;
+        }
+        
+        .rgb-value {
+            background: #3a3a3a;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .rgb-value-label {
+            font-size: 0.75rem;
+            color: #999;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .rgb-value-number {
+            font-size: 1.5rem;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .controls-section {
+            background: #2a2a2a;
+            border-radius: 12px;
+            padding: 30px;
+        }
+        
+        .control-group {
+            margin-bottom: 30px;
+        }
+        
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+        
+        .control-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+            color: #ccc;
+        }
+        
+        .control-value {
+            font-weight: bold;
+            color: #4a9eff;
+            font-family: 'Courier New', monospace;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #3a3a3a;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #4a9eff;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb:hover {
+            background: #6bb0ff;
+            transform: scale(1.2);
+        }
+        
+        input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #4a9eff;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+        
+        input[type="range"]::-moz-range-thumb:hover {
+            background: #6bb0ff;
+            transform: scale(1.2);
+        }
+        
+        .toggle-button {
+            width: 100%;
+            padding: 15px;
+            font-size: 1rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .toggle-button.processing {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .toggle-button.idle {
+            background: #3a3a3a;
+            color: #999;
+        }
+        
+        .toggle-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .static-color-picker {
+            width: 100%;
+            height: 50px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: #3a3a3a;
+        }
+        
+        .formula-display {
+            background: #3a3a3a;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            color: #4a9eff;
+            margin-top: 10px;
+            overflow-x: auto;
+        }
+        
+        @media (max-width: 968px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function RGBCycleTester() {
+            const [isProcessing, setIsProcessing] = useState(true);
+            const [gradientSpeed, setGradientSpeed] = useState(1);
+            const [minIntensity, setMinIntensity] = useState(0.2);
+            const [maxIntensity, setMaxIntensity] = useState(1.0);
+            const [rPhaseOffset, setRPhaseOffset] = useState(0);
+            const [gPhaseOffset, setGPhaseOffset] = useState(10 * Math.PI / 3);
+            const [bPhaseOffset, setBPhaseOffset] = useState(2 * Math.PI / 3);
+            const [staticColor, setStaticColor] = useState('#4a9eff');
+            const [currentRGB, setCurrentRGB] = useState({ r: 0, g: 0, b: 0 });
+            
+            const startTimeRef = useRef(Date.now());
+            const animationFrameRef = useRef(null);
+
+            useEffect(() => {
+                const animate = () => {
+                    if (isProcessing) {
+                        const elapsedTime = (Date.now() - startTimeRef.current) / 1000;
+                        const time = elapsedTime * gradientSpeed;
+                        
+                        // Using the exact formula from the code
+                        const intensityRange = maxIntensity - minIntensity;
+                        const r = Math.abs(Math.sin(time + rPhaseOffset)) * intensityRange + minIntensity;
+                        const g = Math.abs(Math.sin(time + gPhaseOffset)) * intensityRange + minIntensity;
+                        const b = Math.abs(Math.sin(time + bPhaseOffset)) * intensityRange + minIntensity;
+                        
+                        setCurrentRGB({ r, g, b });
+                    } else {
+                        // Parse static color
+                        const color = new THREE.Color(staticColor);
+                        setCurrentRGB({ r: color.r, g: color.g, b: color.b });
+                    }
+                    
+                    animationFrameRef.current = requestAnimationFrame(animate);
+                };
+
+                animate();
+
+                return () => {
+                    if (animationFrameRef.current) {
+                        cancelAnimationFrame(animationFrameRef.current);
+                    }
+                };
+            }, [isProcessing, gradientSpeed, minIntensity, maxIntensity, rPhaseOffset, gPhaseOffset, bPhaseOffset, staticColor]);
+
+            const rgbToHex = (r, g, b) => {
+                const toHex = (val) => {
+                    const hex = Math.round(val * 255).toString(16);
+                    return hex.length === 1 ? '0' + hex : hex;
+                };
+                return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+            };
+
+            const backgroundColor = rgbToHex(currentRGB.r, currentRGB.g, currentRGB.b);
+
+            return (
+                <div className="container">
+                    <h1>RGB Cycle Function Tester</h1>
+                    
+                    <div className="main-content">
+                        <div className="preview-section">
+                            <div 
+                                className="color-display" 
+                                style={{ backgroundColor }}
+                            />
+                            
+                            <div className="rgb-values">
+                                <div className="rgb-value">
+                                    <div className="rgb-value-label">Red</div>
+                                    <div className="rgb-value-number" style={{ color: '#ff6b6b' }}>
+                                        {currentRGB.r.toFixed(3)}
+                                    </div>
+                                </div>
+                                <div className="rgb-value">
+                                    <div className="rgb-value-label">Green</div>
+                                    <div className="rgb-value-number" style={{ color: '#51cf66' }}>
+                                        {currentRGB.g.toFixed(3)}
+                                    </div>
+                                </div>
+                                <div className="rgb-value">
+                                    <div className="rgb-value-label">Blue</div>
+                                    <div className="rgb-value-number" style={{ color: '#4a9eff' }}>
+                                        {currentRGB.b.toFixed(3)}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="formula-display">
+                                r = |sin(t + {rPhaseOffset.toFixed(2)})| * {(maxIntensity - minIntensity).toFixed(2)} + {minIntensity.toFixed(2)}<br/>
+                                g = |sin(t + {gPhaseOffset.toFixed(2)})| * {(maxIntensity - minIntensity).toFixed(2)} + {minIntensity.toFixed(2)}<br/>
+                                b = |sin(t + {bPhaseOffset.toFixed(2)})| * {(maxIntensity - minIntensity).toFixed(2)} + {minIntensity.toFixed(2)}
+                            </div>
+                        </div>
+                        
+                        <div className="controls-section">
+                            <div className="control-group">
+                                <button 
+                                    className={`toggle-button ${isProcessing ? 'processing' : 'idle'}`}
+                                    onClick={() => setIsProcessing(!isProcessing)}
+                                >
+                                    {isProcessing ? '● Processing (Cycling)' : '○ Idle (Static)'}
+                                </button>
+                            </div>
+                            
+                            {isProcessing ? (
+                                <>
+                                    <div className="control-group">
+                                        <div className="control-label">
+                                            <span>Gradient Speed</span>
+                                            <span className="control-value">{gradientSpeed.toFixed(2)}</span>
+                                        </div>
+                                        <input 
+                                            type="range" 
+                                            min="0.1" 
+                                            max="5" 
+                                            step="0.1" 
+                                            value={gradientSpeed}
+                                            onChange={(e) => setGradientSpeed(parseFloat(e.target.value))}
+                                        />
+                                    </div>
+                                    
+                                    <div className="control-group">
+                                        <div className="control-label">
+                                            <span>Min Intensity</span>
+                                            <span className="control-value">{minIntensity.toFixed(2)}</span>
+                                        </div>
+                                        <input 
+                                            type="range" 
+                                            min="0" 
+                                            max="0.8" 
+                                            step="0.05" 
+                                            value={minIntensity}
+                                            onChange={(e) => setMinIntensity(parseFloat(e.target.value))}
+                                        />
+                                    </div>
+                                    
+                                    <div className="control-group">
+                                        <div className="control-label">
+                                            <span>Max Intensity</span>
+                                            <span className="control-value">{maxIntensity.toFixed(2)}</span>
+                                        </div>
+                                        <input 
+                                            type="range" 
+                                            min="0.2" 
+                                            max="1" 
+                                            step="0.05" 
+                                            value={maxIntensity}
+                                            onChange={(e) => setMaxIntensity(parseFloat(e.target.value))}
+                                        />
+                                    </div>
+                                    
+                                    <div className="control-group">
+                                        <div className="control-label">
+                                            <span>Red Phase Offset</span>
+                                            <span className="control-value">{(rPhaseOffset / Math.PI).toFixed(2)}π</span>
+                                        </div>
+                                        <input 
+                                            type="range" 
+                                            min="0" 
+                                            max={2 * Math.PI} 
+                                            step="0.1" 
+                                            value={rPhaseOffset}
+                                            onChange={(e) => setRPhaseOffset(parseFloat(e.target.value))}
+                                        />
+                                    </div>
+                                    
+                                    <div className="control-group">
+                                        <div className="control-label">
+                                            <span>Green Phase Offset</span>
+                                            <span className="control-value">{(gPhaseOffset / Math.PI).toFixed(2)}π</span>
+                                        </div>
+                                        <input 
+                                            type="range" 
+                                            min="0" 
+                                            max={2 * Math.PI} 
+                                            step="0.1" 
+                                            value={gPhaseOffset}
+                                            onChange={(e) => setGPhaseOffset(parseFloat(e.target.value))}
+                                        />
+                                    </div>
+                                    
+                                    <div className="control-group">
+                                        <div className="control-label">
+                                            <span>Blue Phase Offset</span>
+                                            <span className="control-value">{(bPhaseOffset / Math.PI).toFixed(2)}π</span>
+                                        </div>
+                                        <input 
+                                            type="range" 
+                                            min="0" 
+                                            max={2 * Math.PI} 
+                                            step="0.1" 
+                                            value={bPhaseOffset}
+                                            onChange={(e) => setBPhaseOffset(parseFloat(e.target.value))}
+                                        />
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="control-group">
+                                    <div className="control-label">
+                                        <span>Static Color</span>
+                                        <span className="control-value">{staticColor}</span>
+                                    </div>
+                                    <input 
+                                        type="color" 
+                                        className="static-color-picker"
+                                        value={staticColor}
+                                        onChange={(e) => setStaticColor(e.target.value)}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<RGBCycleTester />, document.getElementById('root'));
+    </script>
+</body>
+</html>

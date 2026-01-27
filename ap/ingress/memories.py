@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 import logging
+import json
+from ..utils.embedding_factory import embedding_factory
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, text
@@ -34,6 +36,7 @@ class MemoryResponse(BaseModel):
     kind: str
     created_at: datetime
     importance: float
+
 
 @router.get("/", response_model=List[MemoryResponse])
 async def list_memories(
@@ -140,3 +143,54 @@ async def nuke_all_memories(
         return {"status": "ok", "deleted": result.rowcount}
     
     return {"status": "ok", "deleted": 0}
+
+class MemoryUpdate(BaseModel):
+    content: Optional[str] = None
+    kind: Optional[str] = None
+
+@router.put("/{memory_id}", response_model=MemoryResponse)
+async def update_memory(
+    memory_id: int,
+    update: MemoryUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(Memory).where(Memory.id == memory_id, Memory.user_id == user.user_id)
+    result = await db.execute(stmt)
+    memory = result.scalar_one_or_none()
+    
+    if not memory:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    
+    updated = False
+    content_changed = False
+    
+    if update.content is not None:
+        memory.content = update.content
+        updated = True
+        content_changed = True
+        
+    if update.kind is not None:
+        memory.kind = update.kind
+        updated = True
+    
+    if updated:
+        await db.commit()
+        await db.refresh(memory)
+        
+        if content_changed:
+            embedding = embedding_factory.get_embedding(memory.content)
+            embedding_json = json.dumps(embedding)
+            await db.execute(
+                text("UPDATE memory_vectors SET embedding = :embedding WHERE id = :id"),
+                {"id": memory_id, "embedding": embedding_json}
+            )
+            await db.commit()
+    
+    return MemoryResponse(
+        id=memory.id,
+        content=memory.content,
+        kind=memory.kind,
+        created_at=memory.created_at,
+        importance=memory.importance
+    )
