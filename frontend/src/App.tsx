@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, Mic, Pencil } from 'lucide-react';
 import './App.css';
 import Antigravity from './Antigravity';
+import ReactMarkdown from 'react-markdown';
 
 const API_HEADERS = {
     'X-Arthur-Client': 'Arthur-Prime-V1'
@@ -1249,13 +1250,13 @@ const stopRecording = async () => {
                         {chatHistory.length === 0 && (
                             <div className="chat-message assistant">
                                 <div className="message-icon"><IconCat /></div>
-                                <div className="message-content">Arthur Prime at your service.</div>
+                                <div className="message-content">Arthur Prime at your service! (Markdown supported)</div>
                             </div>
                         )}
                         {chatHistory.map((msg, i) => (
                             <div key={i} className={`chat-message ${msg.role}`}>
                                 {(msg.role === 'assistant' || msg.role === 'Arthur') && <div className="message-icon"><IconCat /></div>}
-                                <div className="message-content">{msg.content}</div>
+                                <div className="message-content"><ReactMarkdown>{msg.content}</ReactMarkdown></div>
                             </div>
                         ))}
                         {isLoading && (
@@ -1359,7 +1360,7 @@ const stopRecording = async () => {
                                     {session.messages.map((msg: any, i: number) => (
                                         <div key={i} style={{ marginBottom: '0.5rem', fontFamily: 'monospace', fontSize: '0.9rem' }}>
                                             <div style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{msg.created_at}</div>
-                                            <div><strong>{msg.role}:</strong> {msg.content}</div>
+                                            <div><strong>{msg.role}:</strong> <ReactMarkdown components={{ p: ({ children }) => <span>{children}</span> }}>{msg.content}</ReactMarkdown></div>
                                         </div>
                                     ))}
                                 </div>

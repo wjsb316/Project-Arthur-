@@ -1,6 +1,7 @@
 import logging
 import sys
 import os
+import queue
 import torch
 import numpy as np
 from pathlib import Path
@@ -24,7 +25,15 @@ except ImportError as e:
     logging.getLogger(__name__).error(f"Failed to import NeuTTSAir from {neutts_path}: {e}")
     NeuTTSAir = None
 
+try:
+    import librosa.effects as _librosa_effects
+except ImportError:
+    _librosa_effects = None
+
 logger = logging.getLogger(__name__)
+
+# Default speech speed: 1.0 = normal. Use < 1.0 to slow down (can introduce artifacts).
+DEFAULT_SPEED = 1.0
 
 class NeurTTSFactory:
     _instance = None
@@ -60,7 +69,7 @@ class NeurTTSFactory:
             
             # Streaming chunks optimized
             self._model = NeuTTSAir(
-                backbone_repo="neuphonic/neutts-nano-q8-gguf",  # GGUF for streaming chunks
+                backbone_repo="neuphonic/neutts-nano-q4-gguf",  # GGUF for streaming chunks
                 backbone_device="cuda",
                 codec_repo="neuphonic/neucodec-onnx-decoder",
                 codec_device="cpu",  # ONNX on CPU requred for chunks streaming
@@ -109,20 +118,68 @@ class NeurTTSFactory:
     def _clean_text(self, text: str) -> str:
         # Remove emojis and other non-standard characters that might confuse phonemizer
         # Keep basic punctuation, letters, numbers, and common symbols
-        text = re.sub(r'[^\w\s.,!?;:\'\-\"()]', '', text)
+        
+        # Remove references: brackets, curly braces, numbered references, URLs
+        text = re.sub(r'\[.*?\]', '', text)
+        text = re.sub(r'\{.*?\}', '', text)
+        text = re.sub(r'https?://\S+|www\.\S+', '', text)
+        # Keep letters, digits, whitespace, and basic punctuation; remove the rest (emojis, etc.)
+        text = re.sub(r'[^\w\s,.?!\'\"\-]', '', text)
         # Normalize whitespace
         text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r'\n+', ' ', text).strip()
+        text = re.sub(r'\\n+', ' ', text).strip()
         return text
 
-    async def generate_audio_wav(self, text: str) -> bytes:
+    def _split_text(self, text: str, max_length: int = 500) -> list[str]:
+        """Split text into chunks <= max_length, preferring sentence boundaries."""
+        if len(text) <= max_length:
+            return [text]
+        
+        # Split on sentence endings (., ?, !) followed by space
+        sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|\!)\s', text)
+        
+        chunks = []
+        current_chunk = []
+        current_length = 0
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            if current_length + len(sentence) <= max_length:
+                current_chunk.append(sentence)
+                current_length += len(sentence) + 1  # +1 for space
+            else:
+                if current_chunk:
+                    chunks.append(' '.join(current_chunk))
+                current_chunk = [sentence]
+                current_length = len(sentence) + 1
+        
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+        
+        return chunks
+
+    def _apply_speed(self, audio: np.ndarray, speed: float) -> np.ndarray:
+        """Time-stretch audio to slow down (speed < 1) or speed up (speed > 1) without changing pitch."""
+        if speed == 1.0 or audio.size == 0:
+            return audio
+        if _librosa_effects is None:
+            logger.warning("librosa not available, cannot apply speed; using original audio.")
+            return audio
+        return _librosa_effects.time_stretch(audio, rate=speed)
+
+    async def generate_audio_wav(self, text: str, speed: float = DEFAULT_SPEED) -> bytes:
         """
         Synthesize speech from text and return WAV bytes (non-streaming).
+        speed: playback rate, 1.0 = normal, < 1.0 = slower (e.g. 0.9 = 10% slower).
         """
         if not text:
             return b""
             
         # Clean text before processing
-        # text = self._clean_text(text)
+        text = self._clean_text(text)
         if not text:
             logger.warning("Text became empty after cleaning.")
             return b""
@@ -161,7 +218,8 @@ class NeurTTSFactory:
 
                 # Time the post-processing
                 post_start = time.time()
-                
+                audio_array = self._apply_speed(audio_array, speed)
+
                 # Convert to 16-bit PCM
                 audio_int16 = (audio_array * 32767).astype(np.int16)
                 
@@ -187,14 +245,15 @@ class NeurTTSFactory:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _generate)
     
-    async def generate_audio_stream(self, text: str):
+    async def generate_audio_stream(self, text: str, speed: float = DEFAULT_SPEED):
         """
         Synthesize speech from text and yield length-prefixed PCM audio chunks.
-        
+        speed: playback rate, 1.0 = normal, < 1.0 = slower (e.g. 0.9 = 10% slower).
+
         Each yielded message is:
           - 4 bytes: uint32 little-endian length of PCM data
           - N bytes: 16-bit PCM audio data at 24kHz, mono
-        
+
         This framing allows the client to reconstruct chunk boundaries
         that would otherwise be lost in HTTP chunked transfer encoding.
         """
@@ -202,7 +261,7 @@ class NeurTTSFactory:
             return
             
         # Clean text before processing
-        # text = self._clean_text(text)
+        text = self._clean_text(text)
         if not text:
             logger.warning("Text became empty after cleaning.")
             return
@@ -223,33 +282,41 @@ class NeurTTSFactory:
         start_time = time.time()
         logger.info(f"Starting streaming audio generation for text length: {len(text)}")
         
+        # Split text if too long
+        text_chunks = self._split_text(text)
+        logger.info(f"Split into {len(text_chunks)} chunks")
+        
         def _stream_generator():
             chunk_count = 0
             first_chunk_time = None
             try:
-                for chunk in self._model.infer_stream(text, self.ref_codes, self.ref_text):
-                    if chunk is None or chunk.size == 0:
-                        continue
-                    chunk_count += 1
-                    
-                    # Track time to first chunk
-                    if chunk_count == 1:
-                        first_chunk_time = time.time()
-                        ttfc = first_chunk_time - start_time
-                        logger.info(f"Time to first chunk: {ttfc:.3f}s")
-                    
-                    # Log chunk info for debugging
-                    if chunk_count <= 3:
-                        logger.info(f"Chunk {chunk_count}: shape={chunk.shape}, dtype={chunk.dtype}, "
-                                  f"min={chunk.min():.3f}, max={chunk.max():.3f}, samples={chunk.size}")
-                    
-                    # Convert float32 [-1, 1] to int16 PCM (same as example code)
-                    audio_int16 = (chunk * 32767).astype(np.int16)
-                    pcm_bytes = audio_int16.tobytes()
-                    
-                    # Prefix with 4-byte length (uint32 little-endian)
-                    length_prefix = struct.pack('<I', len(pcm_bytes))
-                    yield length_prefix + pcm_bytes
+                for text_chunk in text_chunks:
+                    for chunk in self._model.infer_stream(text_chunk, self.ref_codes, self.ref_text):
+                        if chunk is None or chunk.size == 0:
+                            continue
+                        chunk_count += 1
+                        
+                        # Track time to first chunk
+                        if chunk_count == 1:
+                            first_chunk_time = time.time()
+                            ttfc = first_chunk_time - start_time
+                            logger.info(f"Time to first chunk: {ttfc:.3f}s")
+                        
+                        # Log chunk info for debugging
+                        if chunk_count <= 3:
+                            logger.info(f"Chunk {chunk_count}: shape={chunk.shape}, dtype={chunk.dtype}, "
+                                      f"min={chunk.min():.3f}, max={chunk.max():.3f}, samples={chunk.size}")
+                        
+                        # Optional time-stretch to slow down/speed up without changing pitch
+                        chunk = self._apply_speed(chunk, speed)
+                        
+                        # Convert float32 [-1, 1] to int16 PCM (same as example code)
+                        audio_int16 = (chunk * 32767).astype(np.int16)
+                        pcm_bytes = audio_int16.tobytes()
+                        
+                        # Prefix with 4-byte length (uint32 little-endian)
+                        length_prefix = struct.pack('<I', len(pcm_bytes))
+                        yield length_prefix + pcm_bytes
                 
                 total_time = time.time() - start_time
                 avg_chunk_time = (time.time() - first_chunk_time) / chunk_count if first_chunk_time else 0
@@ -259,21 +326,32 @@ class NeurTTSFactory:
             except Exception as e:
                 logger.error(f"Error during streaming audio generation: {e}")
         
-        # Stream chunks in executor to avoid blocking
+        # Run the sync generator in a single executor thread (generators must not cross threads)
+        # and pass chunks to the async generator via a thread-safe queue.
         loop = asyncio.get_running_loop()
-        gen = _stream_generator()
-        
-        while True:
+        chunk_queue = queue.Queue()
+
+        def producer():
             try:
-                chunk = await loop.run_in_executor(None, lambda: next(gen, None))
+                for framed_chunk in _stream_generator():
+                    chunk_queue.put(framed_chunk)
+            except Exception as e:
+                logger.error(f"Error in stream producer: {e}")
+            finally:
+                chunk_queue.put(None)
+
+        producer_future = loop.run_in_executor(None, producer)
+        try:
+            while True:
+                chunk = await loop.run_in_executor(None, chunk_queue.get)
                 if chunk is None:
                     break
                 yield chunk
-            except StopIteration:
-                break
-            except Exception as e:
-                logger.error(f"Error streaming chunk: {e}")
-                break
+        finally:
+            try:
+                await producer_future
+            except Exception:
+                pass
 
 # Create global instance
 neurtts_factory = NeurTTSFactory()

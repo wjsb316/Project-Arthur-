@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -172,6 +172,7 @@ def build_chat_router(
     @router.post("/voice")
     async def voice_chat(
         file: UploadFile = File(...),
+        speed: float = Query(1.0, ge=0.5, le=2.0, description="Playback speed: 1.0=normal, <1=slower (may sound odd)"),
         user: User = Depends(get_current_user),
     ):
         try:
@@ -205,7 +206,7 @@ def build_chat_router(
                 response_text = result["response"]["content"]
                 audio_base64 = None
                 if response_text:
-                    wav_bytes = await neurtts_factory.generate_audio_wav(response_text)
+                    wav_bytes = await neurtts_factory.generate_audio_wav(response_text, speed=speed)
                     if wav_bytes:
                         audio_base64 = base64.b64encode(wav_bytes).decode('utf-8')
                     
@@ -226,6 +227,7 @@ def build_chat_router(
     @router.post("/voice/stream")
     async def voice_chat_stream(
         file: UploadFile = File(...),
+        speed: float = Query(1.0, ge=0.5, le=2.0, description="Playback speed: 1.0=normal, <1=slower (may sound odd)"),
         user: User = Depends(get_current_user),
     ):
         """
@@ -266,7 +268,7 @@ def build_chat_router(
                 
                 # Stream audio chunks as they're generated
                 async def audio_generator():
-                    async for chunk in neurtts_factory.generate_audio_stream(response_text):
+                    async for chunk in neurtts_factory.generate_audio_stream(response_text, speed=speed):
                         yield chunk
                 
                 return StreamingResponse(
