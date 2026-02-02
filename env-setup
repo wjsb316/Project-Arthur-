@@ -1,10 +1,14 @@
-Docker
-    WSL backend 24.04
-    pytorch/pytorch:2.9.1-cuda13.0-cudnn9-runtime
+WSL Setup
+    Open Powershell:
+        wsl --install -d Ubuntu-24.04
+        sudo apt update && sudo apt upgrade -y
+        Nvidia GPU Drivers inside WSL - should already be installed - check with nvidia-smi
+        Nvidia container toolkit inside 24.04 WSL
+            https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#with-apt-ubuntu-debian
+
+Docker Setup
     Select 24.04 in Docker>Settings>Resources>WSL integration
-Nvidia GPU Drivers inside WSL - should already be installed - check with nvidia-smi
-Nvidia container toolkit inside 24.04 WSL
-    https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#with-apt-ubuntu-debian
+    
 WSL (local dev env)
     user: arthur
     pass: assistant
