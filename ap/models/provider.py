@@ -74,7 +74,9 @@ class OpenAIModelProvider:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._model = model
-        self._client = client or httpx.AsyncClient()
+        # Use a long read timeout for streaming: x.ai can take >5s between chunks (default httpx timeout).
+        _timeout = httpx.Timeout(30.0, read=120.0) if client is None else None
+        self._client = client or httpx.AsyncClient(timeout=_timeout)
         self._stream_events: dict[str, asyncio.Event] = {}
 
     async def stream(
