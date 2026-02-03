@@ -25,6 +25,8 @@ Development environment
     cd /home/arthur/Project-Arthur-
     docker build -t project-arthur Project-Arthur-
     docker run --name arthur-prime --gpus all -d --rm -p 8000:8000   -v /home/arthur/Project-Arthur-:/app   --entrypoint /app/entrypoint.sh   project-arthur
+    FOR SHANE: docker run --name arthur-prime --gpus all -d --rm -p 8000:8000   -v /home/WJSbr/Project-Arthur-:/app   --entrypoint /app/entrypoint.sh   project-arthur
+
 
     If I need to restart container to reflect backend changes:
         docker restart arthur-prime

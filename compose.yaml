@@ -1,0 +1,16 @@
+# Run with: Docker Compose "Up" (play on this stack) or: docker compose up -d
+# Matches: docker run --name arthur-prime --gpus all -d --rm -p 8000:8000 project-arthur-prod
+services:
+  arthur-prime:
+    image: project-arthur-prod
+    container_name: arthur-prime
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: "no"   # similar to --rm: don't restart when container exits
