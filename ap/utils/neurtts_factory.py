@@ -2,6 +2,7 @@ import logging
 import sys
 import os
 import queue
+import threading
 import torch
 import numpy as np
 from pathlib import Path
@@ -38,6 +39,18 @@ DEFAULT_SPEED = 1.0
 # Silence (seconds) inserted between text chunks so sentence boundaries have a pause when we split.
 SAMPLE_RATE = 24000
 PAUSE_BETWEEN_CHUNKS_SEC = 0.45
+
+
+def _is_client_interrupt_error(exc: BaseException) -> bool:
+    """Treat backend errors that often occur when the client disconnects/interrupts as expected."""
+    msg = str(exc).lower()
+    return (
+        "llama_decode returned -1" in msg
+        or "llama_decode" in msg and "failed" in msg
+        or "brokenpipe" in msg
+        or "connection reset" in msg
+        or "connection closed" in msg
+    )
 
 class NeurTTSFactory:
     _instance = None
@@ -304,12 +317,18 @@ class NeurTTSFactory:
         # Split text if too long
         text_chunks = self._split_text(text)
         logger.info(f"Split into {len(text_chunks)} chunks")
-        
+
+        # When set (client disconnected or stream closed), stop generating more chunks.
+        cancel_event = threading.Event()
+
         def _stream_generator():
             chunk_count = 0
             first_chunk_time = None
             try:
                 for text_chunk_idx, text_chunk in enumerate(text_chunks):
+                    if cancel_event.is_set():
+                        logger.info("Streaming audio cancelled (client disconnected).")
+                        break
                     # Insert pause between sentences when we split: add silence after previous chunk
                     if text_chunk_idx > 0:
                         pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * SAMPLE_RATE)
@@ -320,6 +339,8 @@ class NeurTTSFactory:
                         yield struct.pack('<I', len(pause_bytes)) + pause_bytes
 
                     for chunk in self._model.infer_stream(text_chunk, self.ref_codes, self.ref_text):
+                        if cancel_event.is_set():
+                            break
                         if chunk is None or chunk.size == 0:
                             continue
                         chunk_count += 1
@@ -352,7 +373,10 @@ class NeurTTSFactory:
                           f"(avg: {avg_chunk_time:.3f}s/chunk)")
                 
             except Exception as e:
-                logger.error(f"Error during streaming audio generation: {e}")
+                if _is_client_interrupt_error(e):
+                    logger.info("Streaming audio stopped (client interrupted or disconnected): %s", e)
+                else:
+                    logger.error("Error during streaming audio generation: %s", e)
         
         # Run the sync generator in a single executor thread (generators must not cross threads)
         # and pass chunks to the async generator via a thread-safe queue.
@@ -364,7 +388,10 @@ class NeurTTSFactory:
                 for framed_chunk in _stream_generator():
                     chunk_queue.put(framed_chunk)
             except Exception as e:
-                logger.error(f"Error in stream producer: {e}")
+                if _is_client_interrupt_error(e):
+                    logger.info("Stream producer stopped (client interrupted or disconnected): %s", e)
+                else:
+                    logger.error("Error in stream producer: %s", e)
             finally:
                 chunk_queue.put(None)
 
@@ -376,6 +403,8 @@ class NeurTTSFactory:
                     break
                 yield chunk
         finally:
+            # Signal producer to stop (client disconnected or stream finished).
+            cancel_event.set()
             try:
                 await producer_future
             except Exception:

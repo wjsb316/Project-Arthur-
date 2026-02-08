@@ -9,8 +9,28 @@ export function useVoiceRecording(
   const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const playbackAbortControllerRef = useRef<AbortController | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+
+  const stopPlayback = useCallback(() => {
+    playbackAbortControllerRef.current?.abort();
+    audioSourcesRef.current.forEach((source) => {
+      try {
+        source.stop(0);
+      } catch {
+        // already stopped
+      }
+    });
+    audioSourcesRef.current = [];
+    if (audioContextRef.current?.state !== 'closed') {
+      audioContextRef.current?.suspend?.();
+    }
+    setIsVoiceProcessing(false);
+  }, []);
 
   const startRecording = useCallback(async () => {
+    stopPlayback();
     if (
       !window.isSecureContext &&
       window.location.hostname !== 'localhost' &&
@@ -48,11 +68,14 @@ export function useVoiceRecording(
       setIsVoiceProcessing(true);
       const formData = new FormData();
       formData.append('file', audioBlob, 'recording.wav');
+      const abortController = new AbortController();
+      playbackAbortControllerRef.current = abortController;
       try {
         const res = await fetch('/api/chat/voice/stream', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: formData,
+          signal: abortController.signal,
         });
         if (res.ok) {
           const sessionId = res.headers.get('X-Session-ID');
@@ -65,6 +88,7 @@ export function useVoiceRecording(
           if (res.body) {
             try {
               const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+              audioContextRef.current = audioContext;
               const sampleRate = 24000;
               const reader = res.body.getReader();
               let nextStartTime = 0;
@@ -92,6 +116,7 @@ export function useVoiceRecording(
                 const source = audioContext.createBufferSource();
                 source.buffer = audioBuffer;
                 source.connect(audioContext.destination);
+                audioSourcesRef.current.push(source);
                 const now = audioContext.currentTime;
                 const startTime = Math.max(now + 0.01, nextStartTime);
                 source.start(startTime);
@@ -144,6 +169,7 @@ export function useVoiceRecording(
                 }
               }
             } catch (e) {
+              if ((e as Error)?.name === 'AbortError') return;
               console.error('Error processing streaming audio:', e);
               setIsVoiceProcessing(false);
             }
@@ -152,13 +178,15 @@ export function useVoiceRecording(
           setIsVoiceProcessing(false);
         }
       } catch (e) {
-        console.error('Voice processing error:', e);
+        if ((e as Error)?.name !== 'AbortError') {
+          console.error('Voice processing error:', e);
+        }
         setIsVoiceProcessing(false);
       }
       mediaRecorder.stream.getTracks().forEach((track) => track.stop());
     };
     mediaRecorder.stop();
-  }, [token, setCurrentSessionId, setIsNewSession]);
+  }, [token, setCurrentSessionId, setIsNewSession, stopPlayback]);
 
   return { isRecording, isVoiceProcessing, startRecording, stopRecording };
 }
