@@ -88,17 +88,14 @@ class OpenAIModelProvider:
 
         self._stream_events[stream_id] = cancel_event
         start = time.perf_counter()
-        
-        # Log complete text being sent to LLM for debugging/relevance tuning
+
+        # Log entire prompt sent to LLM (same style as speech synthesizer input)
         logger.info(
-            "llm_request_text",
-            extra={
-                "event": "llm_request_text",
-                "stream_id": stream_id,
-                "model": self._model,
-                "text_length": len(text),
-                "text_content": text,
-            },
+            "LLM request prompt (stream_id=%s, model=%s, length=%d):\n%s",
+            stream_id,
+            self._model,
+            len(text),
+            text,
         )
         
         is_xai = "x.ai" in self._base_url

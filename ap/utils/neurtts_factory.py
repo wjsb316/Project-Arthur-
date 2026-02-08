@@ -212,8 +212,11 @@ class NeurTTSFactory:
 
             try:
                 import time
-                logger.info(f"Generating audio for text length: {len(text)}")
-                logger.info(f"Text preview: {text[:100]}...")
+                logger.info(
+                    "Speech synthesizer input (length=%d):\n%s",
+                    len(text),
+                    text,
+                )
                 
                 # Time the actual inference
                 start_time = time.time()
