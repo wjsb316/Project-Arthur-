@@ -73,6 +73,7 @@ function App() {
 
   const { isRecording, isVoiceProcessing, startRecording, stopRecording } = useVoiceRecording(
     token,
+    currentSessionId,
     setCurrentSessionId,
     setIsNewSession
   );
@@ -107,6 +108,20 @@ function App() {
         .finally(() => setConfigLoading(false));
     }
   }, [view, token]);
+
+  // When opening chat (dashboard), sync with server only if we have a current session
+  useEffect(() => {
+    if (view !== 'dashboard' || !token || currentSessionId == null) return;
+    fetch('/api/chat/history', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
+      .then((res) => res.ok ? res.json() : Promise.reject(new Error('Failed to load history')))
+      .then((data: HistorySession[]) => {
+        const session = data?.find((s) => s.id === currentSessionId);
+        if (session) {
+          setChatHistory(session.messages.map((msg) => ({ role: msg.role, content: msg.content })));
+        }
+      })
+      .catch(console.error);
+  }, [view, token, currentSessionId]);
 
   const fetchMemories = () => {
     fetch('/api/memories/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })

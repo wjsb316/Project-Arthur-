@@ -234,6 +234,7 @@ def build_chat_router(
     async def voice_chat_stream(
         file: UploadFile = File(...),
         speed: float = Query(1.0, ge=0.5, le=2.0, description="Playback speed: 1.0=normal, <1=slower (may sound odd)"),
+        session_id: Optional[int] = Query(None, description="Continue this chat session (e.g. from chat window)"),
         user: User = Depends(get_current_user),
     ):
         """
@@ -264,7 +265,7 @@ def build_chat_router(
                     text_input=transcribed_text,
                     user=user,
                     new_session=False,
-                    session_id=None,
+                    session_id=session_id,
                     is_voice=True,
                 )
 
