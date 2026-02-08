@@ -94,12 +94,18 @@ class MemoryStore:
             await session.commit()
             return result.rowcount > 0
 
-    async def retrieve_relevant(self, query: str, user_id: str, *, limit: int = 5) -> List[MemoryEntry]:
+    async def retrieve_relevant(
+        self, query: str, user_id: str, *, limit: int = 5, similarity_threshold: float | None = None
+    ) -> List[MemoryEntry]:
         """Retrieve memories relevant to the query string for a specific user.
-        
+
         Uses a hybrid approach:
-        1. If embeddings available: Vector search (semantic)
-        2. Fallback/Hybrid: Recency/Decay/Keyword overlap (lexical)
+        1. If embeddings available: Vector search (semantic); only results with
+           cosine similarity >= similarity_threshold (or the store default) are used.
+        2. Fallback/Hybrid: Recency/Decay/Keyword overlap (lexical).
+
+        Args:
+            similarity_threshold: Override the store's minimum cosine similarity (0–1) for this call.
         """
         now_ts = int(time.time())
         tokens = set(query.lower().split())
@@ -119,14 +125,17 @@ class MemoryStore:
                 limit=limit * 2
             )
             
+            from ..runtime_config import get_config
+            threshold = (
+                similarity_threshold
+                if similarity_threshold is not None
+                else get_config()["memory_similarity_threshold"]
+            )
             for row_dict in vector_results:
-                # Retrieve raw row if possible, or use the dict
-                # The shared retriever returns dicts, but we need Memory objects for downstream hybrid logic.
-                # However, since we are doing a hybrid mix, we might need to fetch the objects anyway 
-                # or just use the IDs to boost scores.
-                
                 # distance is cosine distance (0-2). 0 = perfect match.
                 similarity = max(0, 1 - row_dict['distance'])
+                if similarity < threshold:
+                    continue
                 candidates[row_dict['id']] = {"vector_score": similarity, "id": row_dict['id']}
                 
         except Exception as e:

@@ -16,7 +16,9 @@ from .ingress.chat import build_chat_router
 from .ingress.agents import build_agents_router
 from .ingress.guardrails import build_guardrails_router
 from .ingress.memories import router as memories_router
+from .ingress.config import router as config_router
 from .logging_config import configure_logging
+from .runtime_config import set_config_path, load_persisted
 from .memory import MemoryStore
 from .persistence.permissions import PermissionRepository
 from .persistence.audit import AuditLog
@@ -66,7 +68,11 @@ def create_app(
         model=settings.openai_model,
     )
     
-    # Use the ORM-based MemoryStore
+    # Runtime config (persisted next to memory DB); load before use
+    set_config_path(settings.memory_db_path.parent / "config_overrides.json")
+    load_persisted()
+
+    # Use the ORM-based MemoryStore (similarity threshold from runtime config)
     memory = memory_store or MemoryStore(session_maker)
     
     professional_gate = ProfessionalBrainGate(permission_repository)
@@ -114,6 +120,7 @@ def create_app(
     application.include_router(build_agents_router())
     application.include_router(build_guardrails_router())
     application.include_router(memories_router)
+    application.include_router(config_router)
 
     from .ingress.audit import build_audit_router  # local import to avoid cycle
 

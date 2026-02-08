@@ -142,6 +142,10 @@ function App() {
   const chunksRef = useRef<Blob[]>([]);
   const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
 
+  // Config (Settings) – runtime config from /api/config
+  const [configLoading, setConfigLoading] = useState(false);
+  const [memorySimilarityThreshold, setMemorySimilarityThreshold] = useState(0);
+
   // Check valid token on load (optional: verify with backend)
   useEffect(() => {
     if (token) {
@@ -197,6 +201,18 @@ function App() {
     }
     if (view === 'memories' && token) {
         fetchMemories();
+    }
+    if (view === 'settings' && token) {
+        setConfigLoading(true);
+        fetch('/api/config/', {
+            headers: { 'Authorization': `Bearer ${token}`, ...API_HEADERS }
+        })
+            .then(res => res.ok ? res.json() : Promise.reject(new Error('Failed to load config')))
+            .then((data: { memory_similarity_threshold: number }) => {
+                setMemorySimilarityThreshold(data.memory_similarity_threshold);
+            })
+            .catch(console.error)
+            .finally(() => setConfigLoading(false));
     }
   }, [view, token]);
 
@@ -1851,7 +1867,38 @@ const stopRecording = async () => {
                 <div className="content-placeholder">
                     <h2>{view.charAt(0).toUpperCase() + view.slice(1)}</h2>
                     {view === 'settings' && (
-                         <button onClick={handleDeleteAccount} className="danger-btn">Delete Account</button>
+                    <div className="settings-section">
+                        <h3>Memory</h3>
+                        <div className="form-group">
+                            <label htmlFor="memory-similarity-slider">
+                                Cosine similarity threshold: <strong>{memorySimilarityThreshold}</strong> (0–100)
+                            </label>
+                            <input
+                                id="memory-similarity-slider"
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={1}
+                                value={memorySimilarityThreshold}
+                                disabled={configLoading}
+                                onChange={(e) => {
+                                    const v = parseInt(e.target.value, 10);
+                                    setMemorySimilarityThreshold(v);
+                                    fetch('/api/config/', {
+                                        method: 'PATCH',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                            'Authorization': `Bearer ${token}`,
+                                            ...API_HEADERS
+                                        },
+                                        body: JSON.stringify({ memory_similarity_threshold: v })
+                                    }).catch(console.error);
+                                }}
+                            />
+                            <p className="form-hint">Minimum similarity (0–100) for memories to be retrieved. Higher = stricter.</p>
+                        </div>
+                        <button onClick={handleDeleteAccount} className="danger-btn">Delete Account</button>
+                    </div>
                     )}
                 </div>
             )}

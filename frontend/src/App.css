@@ -362,6 +362,11 @@ body {
     max-width: 400px;
     color: white;
 }
+.settings-section { margin-bottom: 2rem; }
+.settings-section h3 { margin-bottom: 1rem; font-size: 1.1rem; }
+.form-hint { font-size: 0.85rem; color: var(--text-color); opacity: 0.85; margin-top: 0.35rem; }
+.form-group input[type="range"] { padding: 0; accent-color: var(--primary-color); }
+
 .form-group {
     margin-bottom: 1rem;
     text-align: left;
