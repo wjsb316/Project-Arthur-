@@ -107,7 +107,10 @@ def create_app(
     application.include_router(build_streaming_router(provider, memory, personal, audit))
     application.include_router(build_professional_router(permission_repository))
     application.include_router(build_auth_router()) # No repo arg needed, uses dependency
-    application.include_router(build_chat_router(provider, memory, personal, audit))
+    application.include_router(build_chat_router(
+        provider, memory, personal, audit,
+        voice_system_prompt=settings.voice_system_prompt,
+    ))
     application.include_router(build_agents_router())
     application.include_router(build_guardrails_router())
     application.include_router(memories_router)

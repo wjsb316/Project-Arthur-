@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, validation_alias="XAI_KEY")
     openai_base_url: str = "https://api.x.ai/v1"
     openai_model: str = "grok-4-fast-reasoning"
+    # System prompt used when the user is in a voice conversation (input=voice, output=TTS).
+    # If unset, a default voice-optimized prompt is used in the agent graph.
+    voice_system_prompt: str | None = None
 
     class Config:
         env_prefix = "ARTHUR_"

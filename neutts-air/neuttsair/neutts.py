@@ -96,7 +96,7 @@ class NeuTTSAir:
         self.hop_length = 480
         self.streaming_overlap_frames = 3
         self.streaming_frames_per_chunk = 25
-        self.streaming_lookforward = 75
+        self.streaming_lookforward = 100
         self.streaming_lookback = 75
         self.streaming_stride_samples = self.streaming_frames_per_chunk * self.hop_length
 

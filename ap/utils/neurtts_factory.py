@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 # Default speech speed: 1.0 = normal. Use < 1.0 to slow down (can introduce artifacts).
 DEFAULT_SPEED = 1.0
 
+# Silence (seconds) inserted between text chunks so sentence boundaries have a pause when we split.
+SAMPLE_RATE = 24000
+PAUSE_BETWEEN_CHUNKS_SEC = 0.45
+
 class NeurTTSFactory:
     _instance = None
     _model = None
@@ -69,7 +73,7 @@ class NeurTTSFactory:
             
             # Streaming chunks optimized
             self._model = NeuTTSAir(
-                backbone_repo="neuphonic/neutts-nano-q4-gguf",  # GGUF for streaming chunks
+                backbone_repo="neuphonic/neutts-nano-q8-gguf",  # GGUF for streaming chunks
                 backbone_device="cuda",
                 codec_repo="neuphonic/neucodec-onnx-decoder",
                 codec_device="cpu",  # ONNX on CPU requred for chunks streaming
@@ -123,12 +127,20 @@ class NeurTTSFactory:
         text = re.sub(r'\[.*?\]', '', text)
         text = re.sub(r'\{.*?\}', '', text)
         text = re.sub(r'https?://\S+|www\.\S+', '', text)
+        # Normalize em dash (—) and en dash (–) to space-hyphen-space so words stay separate
+        text = re.sub(r'[\u2013\u2014]', ' - ', text)
         # Keep letters, digits, whitespace, and basic punctuation; remove the rest (emojis, etc.)
-        text = re.sub(r'[^\w\s,.?!\'\"\-]', '', text)
+        text = re.sub(r'[^\w\s,.?!;\'\"\-]', '', text)
+        # Ensure every period is followed by a space (for TTS phrasing)
+        text = re.sub(r'\.(?!\s)', '. ', text)
+        # text = re.sub(r'\. ', '... ', text)
+        # Ensure every semicolon is followed by a space
+        text = re.sub(r';(?!\s)', '; ', text)
         # Normalize whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        text = re.sub(r'\n+', ' ', text).strip()
-        text = re.sub(r'\\n+', ' ', text).strip()
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'\n+', ' ', text)
+        text = re.sub(r'\\n+', ' ', text)
+        text = re.sub(r' ', '   ', text)
         return text
 
     def _split_text(self, text: str, max_length: int = 500) -> list[str]:
@@ -183,6 +195,8 @@ class NeurTTSFactory:
         if not text:
             logger.warning("Text became empty after cleaning.")
             return b""
+
+        logger.info("NEURTTS pre-split text to synthesize (full):\n%s", text)
 
         if self._model is None:
             self._initialize_model()
@@ -266,6 +280,8 @@ class NeurTTSFactory:
             logger.warning("Text became empty after cleaning.")
             return
 
+        logger.info("NEURTTS pre-split text to synthesize (full):\n%s", text)
+
         if self._model is None:
             self._initialize_model()
             
@@ -290,7 +306,16 @@ class NeurTTSFactory:
             chunk_count = 0
             first_chunk_time = None
             try:
-                for text_chunk in text_chunks:
+                for text_chunk_idx, text_chunk in enumerate(text_chunks):
+                    # Insert pause between sentences when we split: add silence after previous chunk
+                    if text_chunk_idx > 0:
+                        pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * SAMPLE_RATE)
+                        silence = np.zeros(pause_samples, dtype=np.float32)
+                        silence = self._apply_speed(silence, speed)
+                        silence_int16 = (silence * 32767).astype(np.int16)
+                        pause_bytes = silence_int16.tobytes()
+                        yield struct.pack('<I', len(pause_bytes)) + pause_bytes
+
                     for chunk in self._model.infer_stream(text_chunk, self.ref_codes, self.ref_text):
                         if chunk is None or chunk.size == 0:
                             continue

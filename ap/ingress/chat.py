@@ -40,26 +40,29 @@ def build_chat_router(
     memory_store: MemoryStore,
     personal_brain: PersonalBrain,
     audit_log: AuditLog,
+    voice_system_prompt: Optional[str] = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/chat", tags=["chat"])
     manager = StreamManager(provider)
     session_factory = get_session_maker()
     chat_store = ChatStore(session_factory)
-    
+
     agent_graph = build_agent_graph(
-        memory_store, 
+        memory_store,
         chat_store,
         provider,
         personal_brain,
         audit_log,
-        manager
+        manager,
+        voice_system_prompt=voice_system_prompt,
     )
 
     async def _process_chat_core(
         text_input: str,
         user: User,
         new_session: bool = False,
-        session_id: Optional[int] = None
+        session_id: Optional[int] = None,
+        is_voice: bool = False,
     ):
         if not text_input:
              raise HTTPException(status_code=400, detail="Text required")
@@ -104,8 +107,9 @@ def build_chat_router(
             "user_input": text_input,
             "user_id": user.user_id,
             "session_id": current_session_id,
-            "trace_id": f"chat-{current_session_id}-{user_msg_id}", # Simple trace ID
+            "trace_id": f"chat-{current_session_id}-{user_msg_id}",  # Simple trace ID
             "stream_id": f"chat-{current_session_id}-{user_msg_id}",
+            "is_voice": is_voice,
             "memories": [],
             "chat_history": [],
             "agents": [],
@@ -166,7 +170,8 @@ def build_chat_router(
             text_input=request.text,
             user=user,
             new_session=request.new_session,
-            session_id=request.session_id
+            session_id=request.session_id,
+            is_voice=False,
         )
 
     @router.post("/voice")
@@ -194,14 +199,15 @@ def build_chat_router(
                 if not transcribed_text:
                     raise HTTPException(status_code=400, detail="Could not transcribe audio")
 
-                # 3. Process as chat
+                # 3. Process as chat (voice mode: use TTS-oriented system prompt)
                 result = await _process_chat_core(
                     text_input=transcribed_text,
                     user=user,
-                    new_session=False, # Voice usually continues context, or we can make this configurable
-                    session_id=None    # For now, let it find recent session
+                    new_session=False,
+                    session_id=None,
+                    is_voice=True,
                 )
-                
+
                 # 4. Synthesize speech response
                 response_text = result["response"]["content"]
                 audio_base64 = None
@@ -253,14 +259,15 @@ def build_chat_router(
                 if not transcribed_text:
                     raise HTTPException(status_code=400, detail="Could not transcribe audio")
 
-                # 3. Process as chat
+                # 3. Process as chat (voice mode: use TTS-oriented system prompt)
                 result = await _process_chat_core(
                     text_input=transcribed_text,
                     user=user,
                     new_session=False,
-                    session_id=None
+                    session_id=None,
+                    is_voice=True,
                 )
-                
+
                 # 4. Stream speech response
                 response_text = result["response"]["content"]
                 if not response_text:

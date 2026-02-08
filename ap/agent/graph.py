@@ -8,7 +8,7 @@ import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TypedDict, List, Annotated, Any, AsyncGenerator, Dict, Optional
+from typing import TypedDict, List, Annotated, Any, AsyncGenerator, Dict, Optional, NotRequired
 import operator
 
 from langgraph.graph import StateGraph, END
@@ -199,6 +199,18 @@ async def _assistant_stream(
 
 # --- Graph Logic ---
 
+# Default system prompt for voice/TTS mode when none is configured.
+DEFAULT_VOICE_SYSTEM_PROMPT = (
+    "You are in a voice conversation. Your reply will be read aloud by text-to-speech. "
+    "Keep responses concise and natural for speaking; avoid long lists, markdown formatting, "
+    "or content that does not translate well to speech."
+    "You will optimize all responses to be formatted for text to speech." 
+    "This means no Emojis, and no characters that would need to be read to understood." 
+    "Keep all characters to those that provide tangible meaning when spoken." 
+    "All numbers should be converted to word representation (i.e. 9,100 = nine thousand one hundred) before being returned."
+)
+
+
 class AgentState(TypedDict):
     """State of the agent workflow."""
     user_input: str
@@ -206,13 +218,14 @@ class AgentState(TypedDict):
     session_id: int | None
     trace_id: str
     stream_id: str
-    
+    is_voice: NotRequired[bool]  # True when input was voice and output will be TTS
+
     # Retrieved context
     memories: List[MemoryEntry]
     chat_history: List[dict]
     agents: List[dict]
     guardrails: List[dict]
-    
+
     # Final output
     final_prompt: str
     response_generator: Optional[AsyncGenerator[str, None]]
@@ -291,15 +304,24 @@ async def retrieve_guardrails(state: AgentState) -> dict:
         return {"guardrails": []}
 
 
-def bundle_context(state: AgentState) -> dict:
+def _get_voice_system_prompt(voice_system_prompt: str | None) -> str:
+    return (voice_system_prompt or DEFAULT_VOICE_SYSTEM_PROMPT).strip()
+
+
+def bundle_context(state: AgentState, voice_system_prompt: str | None = None) -> dict:
     """Node: Format all context into a final prompt string."""
     parts = []
-    
+
+    # 0. Voice/TTS mode: prepend system instruction for the LLM
+    if state.get("is_voice"):
+        voice_instruction = _get_voice_system_prompt(voice_system_prompt)
+        parts.append(f"System (voice/TTS): {voice_instruction}")
+
     # 1. Format Guardrails (these are constraints/rules that guide behavior)
     if state.get("guardrails"):
         guardrail_text = "\n".join([f"- {g['name']}: {g['prompt']}" for g in state["guardrails"]])
         parts.append(f"Active Guardrails (IMPORTANT - Follow these rules):\n{guardrail_text}")
-    
+
     # 2. Format Agents
     if state.get("agents"):
         agent_text = "\n".join([f"Agent {a['name']}: {a['prompt']}" for a in state["agents"]])
@@ -309,15 +331,15 @@ def bundle_context(state: AgentState) -> dict:
     if state.get("memories"):
         mem_text = "\n".join([f"- ({m.kind}) {m.content}" for m in state["memories"]])
         parts.append(f"Relevant Memories:\n{mem_text}")
-    
+
     # 4. Format Chat History
     if state.get("chat_history"):
         hist_text = "\n".join([f"- {m.get('role', 'unknown')}: {m.get('content', '')}" for m in state["chat_history"]])
         parts.append(f"Relevant Chat History:\n{hist_text}")
-    
+
     # 5. Add User Input
     parts.append(f"User: {state['user_input']}")
-    
+
     final_prompt = "\n\n".join(parts)
     return {"final_prompt": final_prompt}
 
@@ -357,18 +379,19 @@ def generate_response(
 
 
 def build_agent_graph(
-    memory_store: MemoryStore, 
+    memory_store: MemoryStore,
     chat_store: ChatStore,
     provider: ModelProvider,
     personal_brain: PersonalBrain,
     audit_log: AuditLog,
-    stream_manager: StreamManager
+    stream_manager: StreamManager,
+    voice_system_prompt: str | None = None,
 ) -> StateGraph:
     """Construct the LangGraph workflow."""
-    
+
     async def _retrieve_memories_node(state: AgentState):
         return await retrieve_memories(state, memory_store)
-        
+
     async def _retrieve_history_node(state: AgentState):
         return await retrieve_history(state, chat_store)
 
@@ -378,23 +401,26 @@ def build_agent_graph(
     async def _retrieve_guardrails_node(state: AgentState):
         return await retrieve_guardrails(state)
 
+    def _bundle_node(state: AgentState):
+        return bundle_context(state, voice_system_prompt=voice_system_prompt)
+
     def _generate_response_node(state: AgentState):
         return generate_response(
-            state, 
-            stream_manager, 
-            provider, 
-            personal_brain, 
+            state,
+            stream_manager,
+            provider,
+            personal_brain,
             audit_log,
             chat_store
         )
 
     workflow = StateGraph(AgentState)
-    
+
     workflow.add_node("retrieve_memories", _retrieve_memories_node)
     workflow.add_node("retrieve_history", _retrieve_history_node)
     workflow.add_node("retrieve_agents", _retrieve_agents_node)
     workflow.add_node("retrieve_guardrails", _retrieve_guardrails_node)
-    workflow.add_node("bundle", bundle_context)
+    workflow.add_node("bundle", _bundle_node)
     workflow.add_node("generate", _generate_response_node)
     
     # Start -> Parallel Retrieval
