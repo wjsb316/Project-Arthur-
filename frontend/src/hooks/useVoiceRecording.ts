@@ -3,6 +3,7 @@ import { useState, useRef, useCallback } from 'react';
 export function useVoiceRecording(
   token: string | null,
   currentSessionId: number | null,
+  isNewSession: boolean,
   setCurrentSessionId: (id: number | null) => void,
   setIsNewSession: (v: boolean) => void
 ) {
@@ -72,7 +73,11 @@ export function useVoiceRecording(
       const abortController = new AbortController();
       playbackAbortControllerRef.current = abortController;
       const url = new URL('/api/chat/voice/stream', window.location.origin);
-      if (currentSessionId != null) url.searchParams.set('session_id', String(currentSessionId));
+      if (isNewSession) {
+        url.searchParams.set('new_session', 'true');
+      } else if (currentSessionId != null) {
+        url.searchParams.set('session_id', String(currentSessionId));
+      }
       try {
         const res = await fetch(url.toString(), {
           method: 'POST',
@@ -189,7 +194,7 @@ export function useVoiceRecording(
       mediaRecorder.stream.getTracks().forEach((track) => track.stop());
     };
     mediaRecorder.stop();
-  }, [token, currentSessionId, setCurrentSessionId, setIsNewSession, stopPlayback]);
+  }, [token, currentSessionId, isNewSession, setCurrentSessionId, setIsNewSession, stopPlayback]);
 
   return { isRecording, isVoiceProcessing, startRecording, stopRecording };
 }

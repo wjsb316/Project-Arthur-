@@ -74,6 +74,7 @@ function App() {
   const { isRecording, isVoiceProcessing, startRecording, stopRecording } = useVoiceRecording(
     token,
     currentSessionId,
+    isNewSession,
     setCurrentSessionId,
     setIsNewSession
   );
