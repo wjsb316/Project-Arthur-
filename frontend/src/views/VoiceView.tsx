@@ -1,20 +1,62 @@
 import { Mic } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { useOpenMicInterruption } from '../hooks/useOpenMicInterruption';
 import Antigravity from '../Antigravity';
 
 interface VoiceViewProps {
   token: string | null;
   isVoiceProcessing: boolean;
   isRecording: boolean;
+  currentSessionId: number | null;
+  isNewSession: boolean;
+  setCurrentSessionId: (id: number | null) => void;
+  setIsNewSession: (v: boolean) => void;
   onStartRecording: () => void;
   onStopRecording: () => void;
+  onInterruptPlayback: () => void;
 }
 
 export default function VoiceView({
+  token,
   isVoiceProcessing,
   isRecording,
+  currentSessionId,
+  isNewSession,
+  setCurrentSessionId,
+  setIsNewSession,
   onStartRecording,
   onStopRecording,
+  onInterruptPlayback,
 }: VoiceViewProps) {
+  const [isOpenMicEnabled, setIsOpenMicEnabled] = useState(false);
+  const [isOpenMicProcessing, setIsOpenMicProcessing] = useState(false);
+
+  // When Open Mic is enabled, continuously listen for speech, interrupt playback, record, and send to backend
+  useOpenMicInterruption({
+    enabled: isOpenMicEnabled,
+    token,
+    currentSessionId,
+    isNewSession,
+    setCurrentSessionId,
+    setIsNewSession,
+    onInterruptPlayback,
+    onVoiceProcessingChange: setIsOpenMicProcessing,
+  });
+
+  const handleToggleOpenMic = useCallback(() => {
+    setIsOpenMicEnabled((prev) => !prev);
+  }, []);
+
+  const handlePressStart = useCallback(() => {
+    if (isOpenMicEnabled) return;
+    onStartRecording();
+  }, [isOpenMicEnabled, onStartRecording]);
+
+  const handlePressStop = useCallback(() => {
+    if (isOpenMicEnabled) return;
+    onStopRecording();
+  }, [isOpenMicEnabled, onStopRecording]);
+
   return (
     <div
       className="voice-interface"
@@ -37,7 +79,7 @@ export default function VoiceView({
           pulseSpeed={10}
           particleShape="sphere"
           fieldStrength={10}
-          isProcessing={isVoiceProcessing}
+          isProcessing={isVoiceProcessing || isOpenMicProcessing}
         />
       </div>
       <div
@@ -54,11 +96,12 @@ export default function VoiceView({
         }}
       >
         <button
-          onMouseDown={onStartRecording}
-          onMouseUp={onStopRecording}
-          onMouseLeave={onStopRecording}
-          onTouchStart={onStartRecording}
-          onTouchEnd={onStopRecording}
+          onMouseDown={handlePressStart}
+          onMouseUp={handlePressStop}
+          onMouseLeave={handlePressStop}
+          onTouchStart={handlePressStart}
+          onTouchEnd={handlePressStop}
+          disabled={isOpenMicEnabled}
           style={{
             width: '80px',
             height: '80px',
@@ -69,10 +112,11 @@ export default function VoiceView({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: 'pointer',
+            cursor: isOpenMicEnabled ? 'not-allowed' : 'pointer',
             boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
             transition: 'all 0.2s ease',
             transform: isRecording ? 'scale(1.1)' : 'scale(1)',
+            opacity: isOpenMicEnabled ? 0.6 : 1,
           }}
         >
           <Mic size={32} />
@@ -86,6 +130,26 @@ export default function VoiceView({
         >
           {isRecording ? 'Listening...' : 'Hold to Speak'}
         </span>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            color: 'white',
+            textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+            fontWeight: 500,
+          }}
+        >
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={isOpenMicEnabled}
+              onChange={handleToggleOpenMic}
+              style={{ width: '16px', height: '16px' }}
+            />
+            <span>Open Mic (interrupt on speech)</span>
+          </label>
+        </div>
       </div>
     </div>
   );

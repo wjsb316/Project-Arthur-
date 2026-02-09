@@ -71,7 +71,7 @@ function App() {
   const [configLoading, setConfigLoading] = useState(false);
   const [memorySimilarityThreshold, setMemorySimilarityThreshold] = useState(0);
 
-  const { isRecording, isVoiceProcessing, startRecording, stopRecording } = useVoiceRecording(
+  const { isRecording, isVoiceProcessing, startRecording, stopRecording, interruptPlayback } = useVoiceRecording(
     token,
     currentSessionId,
     isNewSession,
@@ -587,8 +587,13 @@ function App() {
             token={token}
             isVoiceProcessing={isVoiceProcessing}
             isRecording={isRecording}
+            currentSessionId={currentSessionId}
+            isNewSession={isNewSession}
+            setCurrentSessionId={setCurrentSessionId}
+            setIsNewSession={setIsNewSession}
             onStartRecording={startRecording}
             onStopRecording={stopRecording}
+            onInterruptPlayback={interruptPlayback}
           />
         )}
         {view === 'dashboard' && (

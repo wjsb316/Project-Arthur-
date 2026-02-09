@@ -287,6 +287,7 @@ def build_chat_router(
                         "X-Session-ID": str(result["session_id"]),
                         "X-Message-ID": str(result["message_id"]),
                         "X-Transcribed-Text": transcribed_text,
+                        "X-Model-Generation-Complete": "true",  # Indicates model has finished generating before audio starts
                         "X-Audio-Format": "pcm16-length-prefixed",  # 4-byte uint32 LE length + PCM data
                         "X-Audio-Sample-Rate": "24000",
                         "X-Audio-Channels": "1",
