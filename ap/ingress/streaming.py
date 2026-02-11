@@ -85,8 +85,7 @@ def build_streaming_router(
         2. Check model provider health.
         3. Store user input in Chat History (Closed Loop).
         4. Use LangGraph agent to retrieve memory & chat history context.
-        5. Store user input in short-term memory (scoped to user).
-        6. Stream response via Server-Sent Events (SSE) logic over JSON-lines.
+        5. Stream response via Server-Sent Events (SSE) logic over JSON-lines.
         """
         try:
             validate_message(message)
@@ -146,15 +145,13 @@ def build_streaming_router(
             "stream_id": message["id"],
             "memories": [],
             "chat_history": [],
+            "current_session_history": [],
             "agents": [],
             "final_prompt": "",
             "response_generator": None
         }
         
         final_state = await agent_graph.ainvoke(initial_state)
-        
-        # Store open loop (fire and forget / async) - Short Term Memory
-        await memory_store.store_open_loop(text, current_user.user_id)
 
         audit_log.append(
             "assistant_stream_start",

@@ -24,7 +24,7 @@ Run container in WSL
 Development environment
     cd /home/arthur/Project-Arthur-
     docker build -t project-arthur Project-Arthur-
-    docker run --name arthur-prime --gpus all -d --rm -p 8000:8000   -v /home/arthur/Project-Arthur-:/app   --entrypoint /app/entrypoint.sh   project-arthur
+    docker run --name arthur-prime --memory=8g --memory-swap=8g --memory-reservation=8g --gpus all -d --rm -p 8000:8000   -v /home/arthur/Project-Arthur-:/app   --entrypoint /app/entrypoint.sh   project-arthur-v2_10
     FOR SHANE: docker run --name arthur-prime --gpus all -d --rm -p 8000:8000   -v /home/WJSbr/Project-Arthur-:/app   --entrypoint /app/entrypoint.sh   project-arthur
 
 

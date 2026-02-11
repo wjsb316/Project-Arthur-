@@ -129,7 +129,7 @@ class MemoryStore:
             threshold = (
                 similarity_threshold
                 if similarity_threshold is not None
-                else get_config()["memory_similarity_threshold"]
+                else get_config().get("similarity_threshold", 0.5)
             )
             for row_dict in vector_results:
                 # distance is cosine distance (0-2). 0 = perfect match.

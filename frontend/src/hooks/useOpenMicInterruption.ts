@@ -73,12 +73,18 @@ export function useOpenMicInterruption({
         });
         if (res.ok) {
           const sessionId = res.headers.get('X-Session-ID');
+          const contentType = res.headers.get('Content-Type') ?? '';
           const transcribedText = res.headers.get('X-Transcribed-Text');
           if (sessionId) {
             setCurrentSessionId(parseInt(sessionId));
             setIsNewSession(false);
           }
           console.log('Transcribed:', transcribedText);
+          if (contentType.includes('application/json')) {
+            await res.json();
+            onVoiceProcessingChange(false);
+            return;
+          }
           if (res.body) {
             try {
               const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();

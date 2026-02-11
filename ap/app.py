@@ -37,7 +37,8 @@ from .utils.neurtts_factory import neurtts_factory
 async def lifespan(app: FastAPI):
     # Startup: Initialize DB
     await init_db()
-    # Initialize TTS model
+    # TTS model is initialized in create_app() so it loads before the server
+    # accepts connections; this call is a no-op if already loaded.
     neurtts_factory.initialize()
     yield
     # Shutdown: Clean up (if needed)
@@ -71,6 +72,11 @@ def create_app(
     # Runtime config (persisted next to memory DB); load before use
     set_config_path(settings.memory_db_path.parent / "config_overrides.json")
     load_persisted()
+
+    # Initialize TTS model synchronously when app is created (before lifespan).
+    # With uvicorn --factory, create_app runs before the server accepts connections,
+    # so the model is loaded once and ready before any requests arrive.
+    neurtts_factory.initialize()
 
     # Use the ORM-based MemoryStore (similarity threshold from runtime config)
     memory = memory_store or MemoryStore(session_maker)
@@ -116,6 +122,7 @@ def create_app(
     application.include_router(build_chat_router(
         provider, memory, personal, audit,
         voice_system_prompt=settings.voice_system_prompt,
+        skip_speech_synthesis=settings.skip_speech_synthesis,
     ))
     application.include_router(build_agents_router())
     application.include_router(build_guardrails_router())

@@ -8,6 +8,7 @@ import platform
 import glob
 import warnings
 import os
+import gc
 
 from neucodec import NeuCodec, DistillNeuCodec
 from phonemizer.backend import EspeakBackend
@@ -43,31 +44,95 @@ def _configure_espeak_library():
 _configure_espeak_library()
 
 
-def _linear_overlap_add(frames: list[np.ndarray], stride: int) -> np.ndarray:
-    # original impl --> https://github.com/facebookresearch/encodec/blob/main/encodec/utils.py
-    assert len(frames)
-    dtype = frames[0].dtype
-    shape = frames[0].shape[:-1]
+# def _linear_overlap_add(frames: list[np.ndarray], stride: int) -> np.ndarray:
+#     # original impl --> https://github.com/facebookresearch/encodec/blob/main/encodec/utils.py
+#     assert len(frames)
+#     dtype = frames[0].dtype
+#     shape = frames[0].shape[:-1]
 
-    total_size = 0
-    for i, frame in enumerate(frames):
-        frame_end = stride * i + frame.shape[-1]
-        total_size = max(total_size, frame_end)
+#     total_size = 0
+#     for i, frame in enumerate(frames):
+#         frame_end = stride * i + frame.shape[-1]
+#         total_size = max(total_size, frame_end)
 
-    sum_weight = np.zeros(total_size, dtype=dtype)
-    out = np.zeros(*shape, total_size, dtype=dtype)
+#     sum_weight = np.zeros(total_size, dtype=dtype)
+#     out = np.zeros(*shape, total_size, dtype=dtype)
 
-    offset: int = 0
-    for frame in frames:
+#     offset: int = 0
+#     for frame in frames:
+#         frame_length = frame.shape[-1]
+#         t = np.linspace(0, 1, frame_length + 2, dtype=dtype)[1:-1]
+#         weight = np.abs(0.5 - (t - 0.5))
+
+#         out[..., offset : offset + frame_length] += weight * frame
+#         sum_weight[offset : offset + frame_length] += weight
+#         offset += stride
+#     assert sum_weight.min() > 0
+#     return out / sum_weight
+
+class IncrementalOverlapAdd:
+    """
+    Streaming-friendly Overlap-Add.
+    Replaces the O(N^2) memory leak with an O(1) shifting buffer.
+    """
+    def __init__(self, stride: int):
+        self.stride = stride
+        self.buffer_out = None
+        self.buffer_weight = None
+
+    def process_frame(self, frame: np.ndarray, is_last: bool = False) -> np.ndarray:
+        # Handle flush command if the stream is empty but we have leftovers
+        if frame.size == 0:
+            if is_last and self.buffer_out is not None:
+                res = np.zeros_like(self.buffer_out)
+                valid = self.buffer_weight > 0
+                res[..., valid] = self.buffer_out[..., valid] / self.buffer_weight[valid]
+                self.buffer_out = None
+                return res
+            return np.array([], dtype=np.float32)
+
         frame_length = frame.shape[-1]
+        prefix_shape = frame.shape[:-1]
+        dtype = frame.dtype
+
+        # Initialize buffers on first frame
+        if self.buffer_out is None:
+            self.buffer_out = np.zeros((*prefix_shape, 0), dtype=dtype)
+            self.buffer_weight = np.zeros(0, dtype=dtype)
+
+        # Apply the exact same triangle weight as your original function
         t = np.linspace(0, 1, frame_length + 2, dtype=dtype)[1:-1]
         weight = np.abs(0.5 - (t - 0.5))
+        weighted_frame = frame * weight
 
-        out[..., offset : offset + frame_length] += weight * frame
-        sum_weight[offset : offset + frame_length] += weight
-        offset += stride
-    assert sum_weight.min() > 0
-    return out / sum_weight
+        # Pad buffers to accommodate the new frame length if needed
+        if self.buffer_out.shape[-1] < frame_length:
+            pad_len = frame_length - self.buffer_out.shape[-1]
+            pad_width_out = [(0, 0)] * len(prefix_shape) + [(0, pad_len)]
+            self.buffer_out = np.pad(self.buffer_out, pad_width_out)
+            self.buffer_weight = np.pad(self.buffer_weight, (0, pad_len))
+
+        # Add the weighted frame to the running buffers
+        self.buffer_out[..., :frame_length] += weighted_frame
+        self.buffer_weight[:frame_length] += weight
+
+        # If it's not the last frame, we can only safely yield the 'stride' amount 
+        # (because the right tail will overlap with the next future frame)
+        samples_to_yield = self.buffer_out.shape[-1] if is_last else self.stride
+
+        # Extract the completed, overlap-added audio
+        finalized_out = self.buffer_out[..., :samples_to_yield]
+        finalized_weight = self.buffer_weight[:samples_to_yield]
+
+        res = np.zeros_like(finalized_out)
+        valid_mask = finalized_weight > 0
+        res[..., valid_mask] = finalized_out[..., valid_mask] / finalized_weight[valid_mask]
+
+        # Shift the buffers left, permanently dropping the yielded audio from memory
+        self.buffer_out = self.buffer_out[..., samples_to_yield:]
+        self.buffer_weight = self.buffer_weight[samples_to_yield:]
+
+        return res
 
 
 class NeuTTSAir:
@@ -92,10 +157,10 @@ class NeuTTSAir:
 
         # Consts
         self.sample_rate = 24_000
-        self.max_context = 4096
+        self.max_context = 2048
         self.hop_length = 480
         self.streaming_overlap_frames = 3
-        self.streaming_frames_per_chunk = 25
+        self.streaming_frames_per_chunk = 50
         self.streaming_lookforward = 100
         self.streaming_lookback = 75
         self.streaming_stride_samples = self.streaming_frames_per_chunk * self.hop_length
@@ -149,9 +214,12 @@ class NeuTTSAir:
                     verbose=True,
                     n_gpu_layers=-1 if is_gpu else 0,
                     n_ctx=self.max_context,
-                    mlock=True,
+                    # mlock=True,
                     flash_attn=True if is_gpu else False,
-                    chat_format="chatml" # Often GGUF models default to this or similar
+                    chat_format="chatml", # Often GGUF models default to this or similar
+                    # use_mmap=False,  # <--- SET THIS TO FALSE
+                    # use_mlock=True  # <--- OPTIONAL: Keeps the model from being swapped out
+                    n_threads=4
                 )
             else:
                 self.backbone = Llama.from_pretrained(
@@ -160,9 +228,12 @@ class NeuTTSAir:
                     verbose=False,
                     n_gpu_layers=-1 if is_gpu else 0,
                     n_ctx=self.max_context,
-                    mlock=True,
+                    # mlock=True,
                     flash_attn=True if is_gpu else False,
-                    chat_format="chatml"
+                    chat_format="chatml",
+                    # use_mmap=False,  # <--- SET THIS TO FALSE
+                    # use_mlock=True  # <--- OPTIONAL: Keeps the model from being swapped out
+                    n_threads=4
                 )
 
             self._is_quantized_model = True
@@ -402,108 +473,106 @@ class NeuTTSAir:
         return output_str
 
     def _infer_stream_ggml(self, ref_codes: torch.Tensor, ref_text: str, input_text: str) -> Generator[np.ndarray, None, None]:
-        ref_text = self._to_phones(ref_text)
-        input_text = self._to_phones(input_text)
+            ref_text = self._to_phones(ref_text)
+            input_text = self._to_phones(input_text)
 
-        codes_str = "".join([f"<|speech_{idx}|>" for idx in ref_codes])
-        prompt = (
-            f"user: Convert the text to speech:<|TEXT_PROMPT_START|>{ref_text} {input_text}"
-            f"<|TEXT_PROMPT_END|>\nassistant:<|SPEECH_GENERATION_START|>{codes_str}"
-        )
+            codes_str = "".join([f"<|speech_{idx}|>" for idx in ref_codes])
+            prompt = (
+                f"user: Convert the text to speech:<|TEXT_PROMPT_START|>{ref_text} {input_text}"
+                f"<|TEXT_PROMPT_END|>\nassistant:<|SPEECH_GENERATION_START|>{codes_str}"
+            )
 
-        # Tokenize with special=True to ensure special tokens are parsed correctly
-        prompt_tokens = self.backbone.tokenize(prompt.encode("utf-8"), special=True)
+            prompt_tokens = self.backbone.tokenize(prompt.encode("utf-8"), special=True)
 
-        audio_cache: list[np.ndarray] = []
-        token_cache: list[str] = [f"<|speech_{idx}|>" for idx in ref_codes]
-        n_decoded_samples: int = 0
-        n_decoded_tokens: int = len(ref_codes)
+            # NEW: Initialize the streaming overlap-add buffer
+            ola = IncrementalOverlapAdd(stride=self.streaming_stride_samples)
 
-        for item in self.backbone(
-            prompt_tokens,
-            max_tokens=self.max_context,
-            temperature=1.0,
-            top_k=50,
-            stop=["<|SPEECH_GENERATION_END|>"],
-            stream=True
-        ):
-            output_str = item["choices"][0]["text"]
-            token_cache.append(output_str)
+            token_cache: list[str] = [f"<|speech_{idx}|>" for idx in ref_codes]
+            n_decoded_tokens: int = len(ref_codes)
 
-            if len(token_cache[n_decoded_tokens:]) >= self.streaming_frames_per_chunk + self.streaming_lookforward:
+            try:
+                for item in self.backbone(
+                    prompt_tokens,
+                    max_tokens=self.max_context,
+                    temperature=1.0,
+                    top_k=50,
+                    stop=["<|SPEECH_GENERATION_END|>"],
+                    stream=True
+                ):
+                    output_str = item["choices"][0]["text"]
+                    token_cache.append(output_str)
 
-                # decode chunk
-                tokens_start = max(
-                    n_decoded_tokens
-                    - self.streaming_lookback
-                    - self.streaming_overlap_frames,
-                    0
-                )
-                tokens_end = (
-                    n_decoded_tokens
-                    + self.streaming_frames_per_chunk
-                    + self.streaming_lookforward
-                    + self.streaming_overlap_frames
-                )
-                sample_start = (
-                    n_decoded_tokens - tokens_start
-                ) * self.hop_length
-                sample_end = (
-                    sample_start
-                    + (self.streaming_frames_per_chunk + 2 * self.streaming_overlap_frames) * self.hop_length
-                )
-                curr_codes = token_cache[tokens_start:tokens_end]
-                recon = self._decode("".join(curr_codes))
+                    if len(token_cache[n_decoded_tokens:]) >= self.streaming_frames_per_chunk + self.streaming_lookforward:
+                        tokens_start = max(
+                            n_decoded_tokens
+                            - self.streaming_lookback
+                            - self.streaming_overlap_frames,
+                            0
+                        )
+                        tokens_end = (
+                            n_decoded_tokens
+                            + self.streaming_frames_per_chunk
+                            + self.streaming_lookforward
+                            + self.streaming_overlap_frames
+                        )
+                        sample_start = (n_decoded_tokens - tokens_start) * self.hop_length
+                        sample_end = sample_start + (self.streaming_frames_per_chunk + 2 * self.streaming_overlap_frames) * self.hop_length
+                        
+                        curr_codes = token_cache[tokens_start:tokens_end]
+                        recon = self._decode("".join(curr_codes))
+                        
+                        if recon.shape[-1] < sample_end:
+                            pad_len = sample_end - recon.shape[-1]
+                            recon = np.pad(recon, (0, pad_len))
+
+                        recon = recon if self.watermarker is None else self.watermarker.apply_watermark(recon, sample_rate=24_000)
+                        recon = recon[sample_start:sample_end]
+                        
+                        # NEW: Process through the O1 buffer and yield immediately
+                        processed_recon = ola.process_frame(recon, is_last=False)
+                        if processed_recon.size > 0:
+                            yield processed_recon
+
+                        n_decoded_tokens += self.streaming_frames_per_chunk
+
+                # Final decoding chunk
+                remaining_tokens = len(token_cache) - n_decoded_tokens
+                if len(token_cache) > n_decoded_tokens:
+                    tokens_start = max(
+                        len(token_cache)
+                        - (self.streaming_lookback + self.streaming_overlap_frames + remaining_tokens),
+                        0
+                    )
+                    sample_start = (
+                        len(token_cache)
+                        - tokens_start
+                        - remaining_tokens
+                        - self.streaming_overlap_frames
+                    ) * self.hop_length
+                    
+                    curr_codes = token_cache[tokens_start:]
+                    recon = self._decode("".join(curr_codes))
+                    recon = recon if self.watermarker is None else self.watermarker.apply_watermark(recon, sample_rate=24_000)
+                    recon = recon[sample_start:]
+
+                    # NEW: Process final chunk and flush the buffer
+                    processed_recon = ola.process_frame(recon, is_last=True)
+                    if processed_recon.size > 0:
+                        yield processed_recon
+                else:
+                    # NEW: Flush the OLA buffer in case there's leftover audio tail
+                    processed_recon = ola.process_frame(np.array([], dtype=np.float32), is_last=True)
+                    if processed_recon.size > 0:
+                        yield processed_recon
+            finally:
+                # EXPLICIT MEMORY CLEANUP
+                # This runs no matter what, even if the user disconnects and aborts the generator
+                del ola
+                del token_cache
+                # Clear large local variables to ensure reference counts hit 0
+                curr_codes = None 
+                recon = None
+                processed_recon = None
                 
-                # Pad with silence if we don't have enough audio (e.g. invalid tokens)
-                if recon.shape[-1] < sample_end:
-                    pad_len = sample_end - recon.shape[-1]
-                    recon = np.pad(recon, (0, pad_len))
-
-                recon = (
-                    recon
-                    if self.watermarker is None
-                    else self.watermarker.apply_watermark(recon, sample_rate=24_000)
-                )
-                recon = recon[sample_start:sample_end]
-                audio_cache.append(recon)
-
-                # postprocess
-                processed_recon = _linear_overlap_add(
-                    audio_cache, stride=self.streaming_stride_samples
-                )
-                new_samples_end = len(audio_cache) * self.streaming_stride_samples
-                processed_recon = processed_recon[
-                    n_decoded_samples:new_samples_end
-                ]
-                n_decoded_samples = new_samples_end
-                n_decoded_tokens += self.streaming_frames_per_chunk
-                yield processed_recon
-
-        # final decoding handled seperately as non-constant chunk size
-        remaining_tokens = len(token_cache) - n_decoded_tokens
-        if len(token_cache) > n_decoded_tokens:
-            tokens_start = max(
-                len(token_cache)
-                - (self.streaming_lookback + self.streaming_overlap_frames + remaining_tokens),
-                0
-            )
-            sample_start = (
-                len(token_cache)
-                - tokens_start
-                - remaining_tokens
-                - self.streaming_overlap_frames
-            ) * self.hop_length
-            curr_codes = token_cache[tokens_start:]
-            recon = self._decode("".join(curr_codes))
-            recon = (
-                recon
-                if self.watermarker is None
-                else self.watermarker.apply_watermark(recon, sample_rate=24_000)
-            )
-            recon = recon[sample_start:]
-            audio_cache.append(recon)
-
-            processed_recon = _linear_overlap_add(audio_cache, stride=self.streaming_stride_samples)
-            processed_recon = processed_recon[n_decoded_samples:]
-            yield processed_recon
+                # Force the garbage collector to reclaim the Numpy arrays immediately
+                gc.collect()

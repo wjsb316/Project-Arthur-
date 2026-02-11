@@ -29,6 +29,7 @@ soundfile==0.13.1
 transformers==4.56.1
 resemble-perth==1.0.1
 numpy==2.2.6
+torchao==0.15.0
 
 # Langchain-nomic for vector storage
 # langchain-nomic==1.0.1

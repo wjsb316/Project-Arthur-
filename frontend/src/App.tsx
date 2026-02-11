@@ -69,7 +69,7 @@ function App() {
 
   // Settings
   const [configLoading, setConfigLoading] = useState(false);
-  const [memorySimilarityThreshold, setMemorySimilarityThreshold] = useState(0);
+  const [similarityThreshold, setSimilarityThreshold] = useState(50);
 
   const { isRecording, isVoiceProcessing, startRecording, stopRecording, interruptPlayback } = useVoiceRecording(
     token,
@@ -104,7 +104,9 @@ function App() {
       setConfigLoading(true);
       fetch('/api/config/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
         .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load config'))))
-        .then((data: { memory_similarity_threshold: number }) => setMemorySimilarityThreshold(data.memory_similarity_threshold))
+        .then((data: { similarity_threshold: number }) => {
+          setSimilarityThreshold(data.similarity_threshold ?? 50);
+        })
         .catch(console.error)
         .finally(() => setConfigLoading(false));
     }
@@ -696,8 +698,8 @@ function App() {
         )}
         {view === 'settings' && (
           <SettingsView
-            memorySimilarityThreshold={memorySimilarityThreshold}
-            setMemorySimilarityThreshold={setMemorySimilarityThreshold}
+            similarityThreshold={similarityThreshold}
+            setSimilarityThreshold={setSimilarityThreshold}
             configLoading={configLoading}
             token={token}
             onDeleteAccount={handleDeleteAccount}

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # System prompt used when the user is in a voice conversation (input=voice, output=TTS).
     # If unset, a default voice-optimized prompt is used in the agent graph.
     voice_system_prompt: str | None = None
+    # When True, /voice/stream skips TTS and returns JSON (for memory-leak troubleshooting).
+    # Set ARTHUR_SKIP_SPEECH_SYNTHESIS=false to restore audio streaming.
+    skip_speech_synthesis: bool = False
 
     class Config:
         env_prefix = "ARTHUR_"

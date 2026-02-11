@@ -15,14 +15,14 @@ router = APIRouter(prefix="/api/config", tags=["config"])
 class ConfigResponse(BaseModel):
     """Current runtime config. Values match Settings UI (e.g. slider 0–100)."""
 
-    memory_similarity_threshold: int = Field(ge=0, le=100, description="Min cosine similarity 0–100")
+    similarity_threshold: int = Field(ge=0, le=100, description="Min cosine similarity 0–100 for all vector searches")
 
 
 class ConfigUpdate(BaseModel):
     """Partial update. Slider sends 0–100; we accept 0–100 and store as 0–1."""
 
-    memory_similarity_threshold: float | None = Field(
-        default=None, ge=0, le=100, description="Min cosine similarity 0–100 (converted to 0–1)"
+    similarity_threshold: float | None = Field(
+        default=None, ge=0, le=100, description="Similarity 0–100 (converted to 0–1)"
     )
 
 
@@ -33,7 +33,7 @@ async def read_config(
     """Return current runtime config (for Settings UI). Slider value 0–100."""
     cfg = get_config()
     return ConfigResponse(
-        memory_similarity_threshold=round(cfg["memory_similarity_threshold"] * 100),
+        similarity_threshold=round(cfg.get("similarity_threshold", 0.5) * 100),
     )
 
 
@@ -44,12 +44,14 @@ async def patch_config(
 ):
     """Update runtime config. Slider value 0–100 is stored as 0–1."""
     updates: dict = {}
-    if body.memory_similarity_threshold is not None:
-        updates["memory_similarity_threshold"] = body.memory_similarity_threshold / 100.0
+    if body.similarity_threshold is not None:
+        updates["similarity_threshold"] = body.similarity_threshold / 100.0
     if not updates:
         cfg = get_config()
-        return ConfigResponse(memory_similarity_threshold=round(cfg["memory_similarity_threshold"] * 100))
+        return ConfigResponse(
+            similarity_threshold=round(cfg.get("similarity_threshold", 0.5) * 100),
+        )
     updated = update_config(updates)
     return ConfigResponse(
-        memory_similarity_threshold=round(updated["memory_similarity_threshold"] * 100),
+        similarity_threshold=round(updated.get("similarity_threshold", 0.5) * 100),
     )

@@ -11,7 +11,7 @@ logger = logging.getLogger("arthur.ap.runtime_config")
 
 # Defaults for parameters exposed via the config API
 _DEFAULTS: dict[str, Any] = {
-    "memory_similarity_threshold": 0.0,  # 0–1; min cosine similarity for memory vector search
+    "similarity_threshold": 0.5,  # 0–1; min cosine similarity for vector searches (memory, chat); guardrails are always included
 }
 
 _runtime: dict[str, Any] = {}
@@ -32,6 +32,15 @@ def load_persisted() -> None:
         with _config_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         _runtime.update(data)
+        # Migrate legacy keys to unified similarity_threshold
+        if "similarity_threshold" not in _runtime:
+            if "memory_similarity_threshold" in _runtime:
+                _runtime["similarity_threshold"] = _runtime["memory_similarity_threshold"]
+            elif "chat_similarity_threshold" in _runtime:
+                _runtime["similarity_threshold"] = _runtime["chat_similarity_threshold"]
+            for old_key in ("memory_similarity_threshold", "chat_similarity_threshold"):
+                _runtime.pop(old_key, None)
+            _persist()
         logger.info("Loaded runtime config from %s", _config_path)
     except Exception as e:
         logger.warning("Could not load runtime config from %s: %s", _config_path, e)

@@ -222,7 +222,8 @@ class AgentState(TypedDict):
 
     # Retrieved context
     memories: List[MemoryEntry]
-    chat_history: List[dict]
+    chat_history: List[dict]  # Vector-similar messages from any session
+    current_session_history: List[dict]  # Full conversation in current session
     agents: List[dict]
     guardrails: List[dict]
 
@@ -246,17 +247,28 @@ async def retrieve_memories(state: AgentState, memory_store: MemoryStore) -> dic
 
 
 async def retrieve_history(state: AgentState, chat_store: ChatStore) -> dict:
-    """Node: Retrieve relevant past chat history via vector search."""
+    """Node: Retrieve (1) full current session history and (2) relevant past context via vector search."""
+    out: dict = {"chat_history": [], "current_session_history": []}
     try:
+        # 1. Vector-similar messages from other sessions only (exclude current to avoid duplication)
         history = await chat_store.retrieve_relevant_history(
             state["user_input"],
             state["user_id"],
-            limit=5
+            limit=5,
+            exclude_session_id=state.get("session_id"),
         )
-        return {"chat_history": history}
+        out["chat_history"] = history
+
+        # 2. Full conversation in current session
+        session_id = state.get("session_id")
+        if session_id:
+            session_messages = await chat_store.get_session_messages(
+                session_id, state["user_id"]
+            )
+            out["current_session_history"] = session_messages
     except Exception as e:
         logger.error(f"Chat history retrieval failed: {e}")
-        return {"chat_history": []}
+    return out
 
 
 async def retrieve_agents(state: AgentState) -> dict:
@@ -278,27 +290,15 @@ async def retrieve_agents(state: AgentState) -> dict:
 
 
 async def retrieve_guardrails(state: AgentState) -> dict:
-    """Node: Retrieve relevant guardrails for the user using vector search."""
+    """Node: Retrieve all guardrails for the user. All guardrails go to the LLM with every query; no similarity filtering."""
     try:
         session_factory = get_session_maker()
-        retriever = VectorRetriever(session_factory)
-        
-        # Use vector search to find relevant guardrails based on user input
-        vector_results = await retriever.retrieve_by_similarity(
-            query=state["user_input"],
-            user_id=state["user_id"],
-            table_name="guardrails",
-            vector_table_name="guardrail_vectors",
-            limit=5
-        )
-        
-        # Convert results to guardrail dicts
-        guardrails_data = [
-            {"name": r.get("name", ""), "prompt": r.get("prompt", "")} 
-            for r in vector_results
-        ]
-        
-        return {"guardrails": guardrails_data}
+        async with session_factory() as session:
+            stmt = select(Guardrail).where(Guardrail.user_id == state["user_id"])
+            result = await session.execute(stmt)
+            guardrails = result.scalars().all()
+            guardrails_data = [{"name": g.name, "prompt": g.prompt} for g in guardrails]
+            return {"guardrails": guardrails_data}
     except Exception as e:
         logger.error(f"Guardrail retrieval failed: {e}")
         return {"guardrails": []}
@@ -332,13 +332,23 @@ def bundle_context(state: AgentState, voice_system_prompt: str | None = None) ->
         mem_text = "\n".join([f"- ({m.kind}) {m.content}" for m in state["memories"]])
         parts.append(f"Relevant Memories:\n{mem_text}")
 
-    # 4. Format Chat History
-    if state.get("chat_history"):
-        hist_text = "\n".join([f"- {m.get('role', 'unknown')}: {m.get('content', '')}" for m in state["chat_history"]])
-        parts.append(f"Relevant Chat History:\n{hist_text}")
+    # 4. Current session conversation (full chat history for this session, including current user message)
+    if state.get("current_session_history"):
+        session_lines = [
+            f"{m.get('role', 'unknown')}: {m.get('content', '')}"
+            for m in state["current_session_history"]
+        ]
+        parts.append(f"Current conversation:\n" + "\n".join(session_lines))
+    else:
+        # No session (e.g. streaming without session) – add user input
+        parts.append(f"User: {state['user_input']}")
 
-    # 5. Add User Input
-    parts.append(f"User: {state['user_input']}")
+    # 5. Relevant past context from vector similarity (other sessions)
+    if state.get("chat_history"):
+        contents = [m.get("content", "").strip() for m in state["chat_history"] if m.get("content")]
+        if contents:
+            hist_text = "\n".join(contents)
+            parts.append(f"Relevant past context (from other conversations):\n{hist_text}")
 
     final_prompt = "\n\n".join(parts)
     return {"final_prompt": final_prompt}

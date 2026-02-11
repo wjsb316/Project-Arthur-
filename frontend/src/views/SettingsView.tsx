@@ -1,23 +1,23 @@
 import React from 'react';
 
 interface SettingsViewProps {
-  memorySimilarityThreshold: number;
-  setMemorySimilarityThreshold: (v: number) => void;
+  similarityThreshold: number;
+  setSimilarityThreshold: (v: number) => void;
   configLoading: boolean;
   token: string | null;
   onDeleteAccount: () => void;
 }
 
 export default function SettingsView({
-  memorySimilarityThreshold,
-  setMemorySimilarityThreshold,
+  similarityThreshold,
+  setSimilarityThreshold,
   configLoading,
   token,
   onDeleteAccount,
 }: SettingsViewProps) {
   const handleThresholdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseInt(e.target.value, 10);
-    setMemorySimilarityThreshold(v);
+    setSimilarityThreshold(v);
     fetch('/api/config/', {
       method: 'PATCH',
       headers: {
@@ -25,7 +25,7 @@ export default function SettingsView({
         Authorization: `Bearer ${token}`,
         'X-Arthur-Client': 'Arthur-Prime-V1',
       },
-      body: JSON.stringify({ memory_similarity_threshold: v }),
+      body: JSON.stringify({ similarity_threshold: v }),
     }).catch(console.error);
   };
 
@@ -33,23 +33,23 @@ export default function SettingsView({
     <div className="content-placeholder">
       <h2>Settings</h2>
       <div className="settings-section">
-        <h3>Memory</h3>
+        <h3>Vector Search</h3>
         <div className="form-group">
-          <label htmlFor="memory-similarity-slider">
-            Cosine similarity threshold: <strong>{memorySimilarityThreshold}</strong> (0–100)
+          <label htmlFor="similarity-slider">
+            Cosine similarity threshold: <strong>{similarityThreshold}</strong> (0–100)
           </label>
           <input
-            id="memory-similarity-slider"
+            id="similarity-slider"
             type="range"
             min={0}
             max={100}
             step={1}
-            value={memorySimilarityThreshold}
+            value={similarityThreshold}
             disabled={configLoading}
             onChange={handleThresholdChange}
           />
           <p className="form-hint">
-            Minimum similarity (0–100) for memories to be retrieved. Higher = stricter.
+            Minimum similarity for vector searches (memories, chat history). Guardrails are always included. Higher = stricter.
           </p>
         </div>
         <button onClick={onDeleteAccount} className="danger-btn">

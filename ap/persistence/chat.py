@@ -21,24 +21,59 @@ class ChatStore:
         self._session_factory = session_factory
         self._retriever = VectorRetriever(session_factory)
 
+    async def get_session_messages(
+        self, session_id: int, user_id: str
+    ) -> List[dict]:
+        """Get all messages for a session in chronological order."""
+        async with self._session_factory() as session:
+            stmt = (
+                select(ChatMessage)
+                .where(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.user_id == user_id,
+                )
+                .order_by(ChatMessage.created_at.asc())
+            )
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+            return [{"role": m.role, "content": m.content} for m in messages]
+
     async def retrieve_relevant_history(
         self,
         query: str,
         user_id: str,
-        limit: int = 5
-    ) -> List[ChatMessage]:
+        limit: int = 5,
+        similarity_threshold: float | None = None,
+        exclude_session_id: Optional[int] = None,
+    ) -> List[dict]:
         """Retrieve relevant past chat messages using vector similarity.
-        
-        Note: This returns raw ChatMessage-like dicts.
+
+        Only returns entries with cosine similarity >= similarity_threshold (or config default).
+        Excludes messages from exclude_session_id (current session) to avoid bundling twice.
         """
-        return await self._retriever.retrieve_by_similarity(
+        from ..runtime_config import get_config
+        threshold = (
+            similarity_threshold
+            if similarity_threshold is not None
+            else get_config().get("similarity_threshold", 0.5)
+        )
+        raw = await self._retriever.retrieve_by_similarity(
             query=query,
             user_id=user_id,
             table_name="chat_messages",
             vector_table_name="chat_message_vectors",
             id_column="id",
-            limit=limit
+            limit=limit * 3,  # Extra candidates for threshold + exclusion filtering
         )
+        filtered = []
+        for row in raw:
+            # Exclude current session – it's bundled separately
+            if exclude_session_id is not None and row.get("session_id") == exclude_session_id:
+                continue
+            similarity = max(0, 1 - row.get("distance", 2))
+            if similarity >= threshold:
+                filtered.append(row)
+        return filtered[:limit]
 
     async def create_session(self, user_id: str, title: str) -> int:
         async with self._session_factory() as session:

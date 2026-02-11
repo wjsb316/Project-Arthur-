@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, delete, select
@@ -41,6 +41,7 @@ def build_chat_router(
     personal_brain: PersonalBrain,
     audit_log: AuditLog,
     voice_system_prompt: Optional[str] = None,
+    skip_speech_synthesis: bool = True,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/chat", tags=["chat"])
     manager = StreamManager(provider)
@@ -112,6 +113,7 @@ def build_chat_router(
             "is_voice": is_voice,
             "memories": [],
             "chat_history": [],
+            "current_session_history": [],
             "agents": [],
             "final_prompt": "",
             "response_generator": None
@@ -145,10 +147,7 @@ def build_chat_router(
             logger.error(f"Error during generation: {e}")
             raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
 
-        # 4. Store open loop (short term memory)
-        await memory_store.store_open_loop(text_input, user.user_id)
-
-        # 5. Return response
+        # 4. Return response
         return {
             "status": "ok",
             "session_id": current_session_id,
@@ -177,7 +176,6 @@ def build_chat_router(
     @router.post("/voice")
     async def voice_chat(
         file: UploadFile = File(...),
-        speed: float = Query(1.0, ge=0.5, le=2.0, description="Playback speed: 1.0=normal, <1=slower (may sound odd)"),
         user: User = Depends(get_current_user),
     ):
         try:
@@ -212,7 +210,7 @@ def build_chat_router(
                 response_text = result["response"]["content"]
                 audio_base64 = None
                 if response_text:
-                    wav_bytes = await neurtts_factory.generate_audio_wav(response_text, speed=speed)
+                    wav_bytes = await neurtts_factory.generate_audio_wav(response_text)
                     if wav_bytes:
                         audio_base64 = base64.b64encode(wav_bytes).decode('utf-8')
                     
@@ -233,7 +231,6 @@ def build_chat_router(
     @router.post("/voice/stream")
     async def voice_chat_stream(
         file: UploadFile = File(...),
-        speed: float = Query(1.0, ge=0.5, le=2.0, description="Playback speed: 1.0=normal, <1=slower (may sound odd)"),
         session_id: Optional[int] = Query(None, description="Continue this chat session (e.g. from chat window)"),
         new_session: bool = Query(False, description="Start a new chat session (e.g. user clicked New Chat)"),
         user: User = Depends(get_current_user),
@@ -270,16 +267,27 @@ def build_chat_router(
                     is_voice=True,
                 )
 
-                # 4. Stream speech response
+                # 4. Stream speech response (or return JSON when TTS is skipped for troubleshooting)
                 response_text = result["response"]["content"]
                 if not response_text:
                     raise HTTPException(status_code=500, detail="No response generated")
-                
-                # Stream audio chunks as they're generated
+
+                if skip_speech_synthesis:
+                    # Skip TTS: return JSON only (vectors + clear text already stored by _process_chat_core)
+                    return JSONResponse(
+                        content={
+                            **result,
+                            "transcribed_text": transcribed_text,
+                            "audio_base64": None,  # No TTS
+                        },
+                        headers={"X-Session-ID": str(result["session_id"])},
+                    )
+
+                # TTS enabled: stream audio chunks as they're generated
                 async def audio_generator():
-                    async for chunk in neurtts_factory.generate_audio_stream(response_text, speed=speed):
+                    async for chunk in neurtts_factory.generate_audio_stream(response_text):
                         yield chunk
-                
+
                 return StreamingResponse(
                     audio_generator(),
                     media_type="application/octet-stream",

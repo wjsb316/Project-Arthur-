@@ -10,6 +10,8 @@ import asyncio
 import io
 import wave
 import re
+import time
+import struct
 
 # Add neutts-air to sys.path
 # Assuming this file is in ap/utils/
@@ -26,15 +28,7 @@ except ImportError as e:
     logging.getLogger(__name__).error(f"Failed to import NeuTTSAir from {neutts_path}: {e}")
     NeuTTSAir = None
 
-try:
-    import librosa.effects as _librosa_effects
-except ImportError:
-    _librosa_effects = None
-
 logger = logging.getLogger(__name__)
-
-# Default speech speed: 1.0 = normal. Use < 1.0 to slow down (can introduce artifacts).
-DEFAULT_SPEED = 1.0
 
 # Silence (seconds) inserted between text chunks so sentence boundaries have a pause when we split.
 SAMPLE_RATE = 24000
@@ -68,8 +62,8 @@ class NeurTTSFactory:
             pass
 
     def initialize(self):
-        """Explicit initialization of the model"""
-        if self._model is None:
+        """Explicit initialization of the model at startup."""
+        if NeurTTSFactory._model is None:
             self._initialize_model()
 
     def _initialize_model(self):
@@ -77,60 +71,49 @@ class NeurTTSFactory:
             logger.error("NeuTTSAir class not imported, cannot initialize model.")
             return
 
-        import time
         init_start = time.time()
         logger.info("Initializing NeurTTS-Air model (this may take time on first run for model download)...")
         try:
-
             logger.info("Initializing NeuTTS with GGUF+CUDA acceleration...")
-            
-            # Streaming chunks optimized
-            self._model = NeuTTSAir(
+
+            # Streaming chunks optimized; store on class so singleton state is unambiguous
+            NeurTTSFactory._model = NeuTTSAir(
                 backbone_repo="neuphonic/neutts-nano-q8-gguf",  # GGUF for streaming chunks
                 backbone_device="cuda",
                 codec_repo="neuphonic/neucodec-onnx-decoder",
                 codec_device="cpu",  # ONNX on CPU requred for chunks streaming
             )
-            
-            # # Transmission of wav file
-            # self._model = NeuTTSAir(
-            #     backbone_repo="neuphonic/neutts-air",
-            #     backbone_device="cuda",
-            #     codec_repo="neuphonic/neucodec",
-            #     codec_device="cuda",
-            # )
 
-            
             logger.info("GGUF model initialized with full GPU offloading (n_gpu_layers=-1)")
-            
+
             # Load default reference
             self.ref_voice_path = neutts_path / "samples" / "dave.pt"
             self.ref_text_path = neutts_path / "samples" / "dave.txt"
-            
+
             if self.ref_voice_path.exists():
                 try:
                     self.ref_codes = torch.load(self.ref_voice_path, weights_only=False)
                     if isinstance(self.ref_codes, torch.Tensor):
                         self.ref_codes = self.ref_codes.tolist()
                 except Exception as e:
-                     logger.error(f"Failed to load reference voice: {e}")
-                     self.ref_codes = []
+                    logger.error(f"Failed to load reference voice: {e}")
+                    self.ref_codes = []
             else:
                 logger.warning(f"Reference voice file not found at {self.ref_voice_path}")
                 self.ref_codes = None
-                
+
             if self.ref_text_path.exists():
                 with open(self.ref_text_path, "r") as f:
                     self.ref_text = f.read().strip()
             else:
-                self.ref_text = "This is a reference text." # Fallback
+                self.ref_text = "This is a reference text."  # Fallback
 
             init_time = time.time() - init_start
             logger.info(f"NeurTTS-Air model initialized successfully in {init_time:.2f}s")
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize NeurTTS-Air model: {e}")
-            raise e
+            raise
 
     def _clean_text(self, text: str) -> str:
         # Remove emojis and other non-standard characters that might confuse phonemizer
@@ -186,19 +169,9 @@ class NeurTTSFactory:
         
         return chunks
 
-    def _apply_speed(self, audio: np.ndarray, speed: float) -> np.ndarray:
-        """Time-stretch audio to slow down (speed < 1) or speed up (speed > 1) without changing pitch."""
-        if speed == 1.0 or audio.size == 0:
-            return audio
-        if _librosa_effects is None:
-            logger.warning("librosa not available, cannot apply speed; using original audio.")
-            return audio
-        return _librosa_effects.time_stretch(audio, rate=speed)
-
-    async def generate_audio_wav(self, text: str, speed: float = DEFAULT_SPEED) -> bytes:
+    async def generate_audio_wav(self, text: str) -> bytes:
         """
         Synthesize speech from text and return WAV bytes (non-streaming).
-        speed: playback rate, 1.0 = normal, < 1.0 = slower (e.g. 0.9 = 10% slower).
         """
         if not text:
             return b""
@@ -211,10 +184,10 @@ class NeurTTSFactory:
 
         logger.info("NEURTTS pre-split text to synthesize (full):\n%s", text)
 
-        if self._model is None:
+        if NeurTTSFactory._model is None:
             self._initialize_model()
-            
-        if self._model is None:
+
+        if NeurTTSFactory._model is None:
             logger.error("Model not initialized, cannot generate audio.")
             return b""
 
@@ -224,50 +197,48 @@ class NeurTTSFactory:
                 return b""
 
             try:
-                import time
                 logger.info(
                     "Speech synthesizer input (length=%d):\n%s",
                     len(text),
                     text,
                 )
-                
+
                 # Time the actual inference
                 start_time = time.time()
-                audio_array = self._model.infer(text, self.ref_codes, self.ref_text)
+                audio_array = NeurTTSFactory._model.infer(text, self.ref_codes, self.ref_text)
                 inference_time = time.time() - start_time
-                
+
                 # Calculate metrics
                 audio_duration = len(audio_array) / 24000  # 24kHz sample rate
                 rtf = inference_time / audio_duration if audio_duration > 0 else 0
-                
+
                 logger.info(f"Inference took {inference_time:.3f}s for {audio_duration:.2f}s of audio (RTF: {rtf:.3f})")
-                
+
                 if audio_array is None or audio_array.size == 0:
-                     logger.error("No audio data generated.")
-                     return b""
+                    logger.error("No audio data generated.")
+                    return b""
 
                 # Time the post-processing
                 post_start = time.time()
-                audio_array = self._apply_speed(audio_array, speed)
 
                 # Convert to 16-bit PCM
                 audio_int16 = (audio_array * 32767).astype(np.int16)
-                
+
                 # Create WAV in memory
                 wav_buffer = io.BytesIO()
                 with wave.open(wav_buffer, 'wb') as wf:
                     wf.setnchannels(1)
-                    wf.setsampwidth(2) # 16-bit
+                    wf.setsampwidth(2)  # 16-bit
                     wf.setframerate(24000)
                     wf.writeframes(audio_int16.tobytes())
-                
+
                 post_time = time.time() - post_start
                 total_time = time.time() - start_time
-                
+
                 logger.info(f"Post-processing took {post_time:.3f}s, total {total_time:.3f}s")
-                    
+
                 return wav_buffer.getvalue()
-                
+
             except Exception as e:
                 logger.error(f"Error during audio generation: {e}")
                 return b""
@@ -275,10 +246,9 @@ class NeurTTSFactory:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _generate)
     
-    async def generate_audio_stream(self, text: str, speed: float = DEFAULT_SPEED):
+    async def generate_audio_stream(self, text: str):
         """
         Synthesize speech from text and yield length-prefixed PCM audio chunks.
-        speed: playback rate, 1.0 = normal, < 1.0 = slower (e.g. 0.9 = 10% slower).
 
         Each yielded message is:
           - 4 bytes: uint32 little-endian length of PCM data
@@ -298,10 +268,10 @@ class NeurTTSFactory:
 
         logger.info("NEURTTS pre-split text to synthesize (full):\n%s", text)
 
-        if self._model is None:
+        if NeurTTSFactory._model is None:
             self._initialize_model()
-            
-        if self._model is None:
+
+        if NeurTTSFactory._model is None:
             logger.error("Model not initialized, cannot generate audio.")
             return
 
@@ -309,8 +279,6 @@ class NeurTTSFactory:
             logger.error("No reference codes loaded. Cannot generate audio.")
             return
         
-        import time
-        import struct
         start_time = time.time()
         logger.info(f"Starting streaming audio generation for text length: {len(text)}")
         
@@ -333,12 +301,11 @@ class NeurTTSFactory:
                     if text_chunk_idx > 0:
                         pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * SAMPLE_RATE)
                         silence = np.zeros(pause_samples, dtype=np.float32)
-                        silence = self._apply_speed(silence, speed)
                         silence_int16 = (silence * 32767).astype(np.int16)
                         pause_bytes = silence_int16.tobytes()
                         yield struct.pack('<I', len(pause_bytes)) + pause_bytes
 
-                    for chunk in self._model.infer_stream(text_chunk, self.ref_codes, self.ref_text):
+                    for chunk in NeurTTSFactory._model.infer_stream(text_chunk, self.ref_codes, self.ref_text):
                         if cancel_event.is_set():
                             break
                         if chunk is None or chunk.size == 0:
@@ -355,10 +322,7 @@ class NeurTTSFactory:
                         if chunk_count <= 3:
                             logger.info(f"Chunk {chunk_count}: shape={chunk.shape}, dtype={chunk.dtype}, "
                                       f"min={chunk.min():.3f}, max={chunk.max():.3f}, samples={chunk.size}")
-                        
-                        # Optional time-stretch to slow down/speed up without changing pitch
-                        chunk = self._apply_speed(chunk, speed)
-                        
+
                         # Convert float32 [-1, 1] to int16 PCM (same as example code)
                         audio_int16 = (chunk * 32767).astype(np.int16)
                         pcm_bytes = audio_int16.tobytes()
@@ -369,9 +333,11 @@ class NeurTTSFactory:
                 
                 total_time = time.time() - start_time
                 avg_chunk_time = (time.time() - first_chunk_time) / chunk_count if first_chunk_time else 0
-                logger.info(f"Finished streaming {chunk_count} chunks in {total_time:.3f}s "
-                          f"(avg: {avg_chunk_time:.3f}s/chunk)")
-                
+                logger.info(
+                    f"Finished streaming {chunk_count} chunks in {total_time:.3f}s "
+                    f"(avg: {avg_chunk_time:.3f}s/chunk)"
+                )
+
             except Exception as e:
                 if _is_client_interrupt_error(e):
                     logger.info("Streaming audio stopped (client interrupted or disconnected): %s", e)
@@ -380,8 +346,9 @@ class NeurTTSFactory:
         
         # Run the sync generator in a single executor thread (generators must not cross threads)
         # and pass chunks to the async generator via a thread-safe queue.
-        loop = asyncio.get_running_loop()
-        chunk_queue = queue.Queue()
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            chunk_queue = queue.Queue()
 
         def producer():
             try:
