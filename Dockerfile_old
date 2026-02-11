@@ -41,8 +41,16 @@ RUN apt-get update && apt-get install -y \
     cmake \
     portaudio19-dev \
     build-essential \
-    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# # Ensure CUDA libraries are in LD_LIBRARY_PATH
+# # We add both the standard system location and the python package location found in this specific image
+# ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH}
+
+# # Create a symlink for libcudart.so.11.0 pointing to libcudart.so.12
+# # This is a workaround for gpt4all/llama-cpp binding explicitly looking for version 11
+# RUN ln -s /opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.12 \
+#     /opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.11.0
 
 
 # Configure Avahi to run in container
@@ -53,27 +61,20 @@ RUN sed -i 's/#enable-dbus=yes/enable-dbus=yes/' /etc/avahi/avahi-daemon.conf &&
 WORKDIR /app
 # ENV PYTHONPATH="${PYTHONPATH}:/app"
 
-# Create and activate a dedicated virtual environment for the app
-# --system-site-packages lets the venv see packages from the base image
-# (e.g. PyTorch and CUDA libs) while still installing our app deps
-# into an isolated environment that avoids PEP 668 issues.
-ENV VENV_PATH=/opt/venv
-RUN python -m venv --system-site-packages ${VENV_PATH}
-ENV PATH="${VENV_PATH}/bin:${PATH}"
-
 # Copy built wheels from the builder stage
 COPY --from=builder /build/wheels /wheels
 
 # Copy requirements file
 COPY requirements.txt .
 
-# Install dependencies into the virtual environment
+# Install dependencies
 # 1. Install llama-cpp-python specifically from our built wheels (force no PyPI lookup for this package)
 # 2. Install the rest from requirements.txt
 RUN pip install --no-cache-dir --no-index --find-links=/wheels llama-cpp-python==0.3.16 && \
     pip install --no-cache-dir -r requirements.txt
 
-
+# RUN pip install llama-cpp-python --force-reinstall --no-cache-dir --upgrade && \
+    # pip install --no-cache-dir -r requirements.txt
 
 # Copy frontend build to a system location preserved during volume mounts
 COPY --from=frontend-builder /frontend/dist /usr/share/app/static

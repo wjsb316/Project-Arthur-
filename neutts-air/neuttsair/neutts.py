@@ -92,7 +92,7 @@ class NeuTTSAir:
 
         # Consts
         self.sample_rate = 24_000
-        self.max_context = 4096
+        self.max_context = 2048
         self.hop_length = 480
         self.streaming_overlap_frames = 3
         self.streaming_frames_per_chunk = 25
@@ -151,7 +151,9 @@ class NeuTTSAir:
                     n_ctx=self.max_context,
                     mlock=True,
                     flash_attn=True if is_gpu else False,
-                    chat_format="chatml" # Often GGUF models default to this or similar
+                    chat_format="chatml", # Often GGUF models default to this or similar
+                    use_mmap=False,  # <--- SET THIS TO FALSE
+                    use_mlock=True  # <--- OPTIONAL: Keeps the model from being swapped out
                 )
             else:
                 self.backbone = Llama.from_pretrained(
@@ -162,7 +164,9 @@ class NeuTTSAir:
                     n_ctx=self.max_context,
                     mlock=True,
                     flash_attn=True if is_gpu else False,
-                    chat_format="chatml"
+                    chat_format="chatml",
+                    use_mmap=False,  # <--- SET THIS TO FALSE
+                    use_mlock=True  # <--- OPTIONAL: Keeps the model from being swapped out
                 )
 
             self._is_quantized_model = True
