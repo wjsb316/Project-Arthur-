@@ -1,55 +1,71 @@
 import logging
-import sys
-import os
 import queue
 import threading
 import torch
 import numpy as np
-from pathlib import Path
 import asyncio
 import io
 import wave
 import re
 import time
 import struct
-
-# Add neutts-air to sys.path
-# Assuming this file is in ap/utils/
-# We need to go up two levels to get to project root, then into neutts-air
-project_root = Path(__file__).parent.parent.parent
-neutts_path = project_root / "neutts-air"
-
-if str(neutts_path) not in sys.path:
-    sys.path.append(str(neutts_path))
-
-try:
-    from neuttsair.neutts import NeuTTSAir
-except ImportError as e:
-    logging.getLogger(__name__).error(f"Failed to import NeuTTSAir from {neutts_path}: {e}")
-    NeuTTSAir = None
+import gc
 
 logger = logging.getLogger(__name__)
 
-# Silence (seconds) inserted between text chunks so sentence boundaries have a pause when we split.
-SAMPLE_RATE = 24000
-PAUSE_BETWEEN_CHUNKS_SEC = 0.45
 
+def _is_client_disconnect(exc: BaseException) -> bool:
+    """Return True for errors that typically mean the client hung up mid-stream.
 
-def _is_client_interrupt_error(exc: BaseException) -> bool:
-    """Treat backend errors that often occur when the client disconnects/interrupts as expected."""
+    When the user interrupts playback (e.g. taps the mic to start a new
+    utterance), the HTTP connection is torn down and the server-side write
+    raises one of these.  They are expected and should be logged at INFO
+    level rather than ERROR so the operator isn't alarmed.
+    """
     msg = str(exc).lower()
-    return (
-        "llama_decode returned -1" in msg
-        or "llama_decode" in msg and "failed" in msg
-        or "brokenpipe" in msg
-        or "connection reset" in msg
-        or "connection closed" in msg
+    return any(
+        phrase in msg
+        for phrase in (
+            "brokenpipe",
+            "broken pipe",
+            "connection reset",
+            "connection closed",
+            "client disconnected",
+            "cancel",
+        )
     )
 
+
+# Default settings (overridable via Settings / env vars)
+DEFAULT_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+DEFAULT_SPEAKER = "Ryan"
+DEFAULT_LANGUAGE = "English"
+
+# Silence inserted between text chunks so sentence boundaries have a natural pause.
+PAUSE_BETWEEN_CHUNKS_SEC = 0.45
+
+# Maximum characters per text chunk sent to the model.  Smaller chunks give
+# faster time-to-first-audio at the cost of slightly more overhead.
+MAX_CHUNK_LENGTH = 200
+
+# When streaming, break each generated audio segment into sub-chunks of this
+# many samples so the client receives data more frequently.
+AUDIO_STREAM_SUB_CHUNK_SAMPLES = 24000  # ~1 second at 24 kHz
+
+
 class NeurTTSFactory:
+    """TTS factory using Qwen3-TTS for speech synthesis.
+
+    Singleton pattern -- one model instance shared across all requests.
+    Concurrent GPU access is serialized via an asyncio.Lock.
+    """
+
     _instance = None
     _model = None
     _lock = asyncio.Lock()
+    _sample_rate: int = 24000  # Sensible default; updated from model output
+    _speaker: str = DEFAULT_SPEAKER
+    _language: str = DEFAULT_LANGUAGE
 
     def __new__(cls):
         if cls._instance is None:
@@ -57,360 +73,366 @@ class NeurTTSFactory:
         return cls._instance
 
     def __init__(self):
-        if self._model is None:
-            # Lazy loading will happen on first use or explicit initialize call
-            pass
+        pass
 
-    def initialize(self):
-        """Explicit initialization of the model at startup."""
+    # ------------------------------------------------------------------
+    # Public helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def sample_rate(self) -> int:
+        return NeurTTSFactory._sample_rate
+
+    # ------------------------------------------------------------------
+    # Initialization
+    # ------------------------------------------------------------------
+
+    def initialize(
+        self,
+        model_name: str | None = None,
+        speaker: str | None = None,
+        language: str | None = None,
+    ):
+        """Explicit initialization of the TTS model at startup."""
         if NeurTTSFactory._model is None:
-            self._initialize_model()
+            NeurTTSFactory._speaker = speaker or DEFAULT_SPEAKER
+            NeurTTSFactory._language = language or DEFAULT_LANGUAGE
+            self._initialize_model(model_name or DEFAULT_MODEL)
 
-    def _initialize_model(self):
-        if NeuTTSAir is None:
-            logger.error("NeuTTSAir class not imported, cannot initialize model.")
-            return
+    def _initialize_model(self, model_name: str):
+        from qwen_tts import Qwen3TTSModel
 
         init_start = time.time()
-        logger.info("Initializing NeurTTS-Air model (this may take time on first run for model download)...")
+        logger.info(
+            "Initializing Qwen3-TTS model: %s (first run downloads weights)...",
+            model_name,
+        )
         try:
-            logger.info("Initializing NeuTTS with GGUF+CUDA acceleration...")
-
-            # Streaming chunks optimized; store on class so singleton state is unambiguous
-            NeurTTSFactory._model = NeuTTSAir(
-                backbone_repo="neuphonic/neutts-nano-q8-gguf",  # GGUF for streaming chunks
-                backbone_device="cuda",
-                codec_repo="neuphonic/neucodec-onnx-decoder",
-                codec_device="cpu",  # ONNX on CPU requred for chunks streaming
-            )
-
-            # Transmission of wav file
-            # NeurTTSFactory._model = NeuTTSAir(
-            #     backbone_repo="neuphonic/neutts-air",
-            #     backbone_device="cuda",
-            #     codec_repo="neuphonic/neucodec",
-            #     codec_device="cuda",
-            # )
-
-            logger.info("GGUF model initialized with full GPU offloading (n_gpu_layers=-1)")
-
-            # Load default reference
-            self.ref_voice_path = neutts_path / "samples" / "dave.pt"
-            self.ref_text_path = neutts_path / "samples" / "dave.txt"
-
-            if self.ref_voice_path.exists():
+            # Try flash_attention_2 first; fall back to sdpa if not installed.
+            for attn_impl in ("flash_attention_2", "sdpa"):
                 try:
-                    self.ref_codes = torch.load(self.ref_voice_path, weights_only=False)
-                    if isinstance(self.ref_codes, torch.Tensor):
-                        self.ref_codes = self.ref_codes.tolist()
-                except Exception as e:
-                    logger.error(f"Failed to load reference voice: {e}")
-                    self.ref_codes = []
-            else:
-                logger.warning(f"Reference voice file not found at {self.ref_voice_path}")
-                self.ref_codes = None
-
-            if self.ref_text_path.exists():
-                with open(self.ref_text_path, "r") as f:
-                    self.ref_text = f.read().strip()
-            else:
-                self.ref_text = "This is a reference text."  # Fallback
+                    NeurTTSFactory._model = Qwen3TTSModel.from_pretrained(
+                        model_name,
+                        device_map="cuda:0",
+                        dtype=torch.bfloat16,
+                        attn_implementation=attn_impl,
+                    )
+                    logger.info("Qwen3-TTS using attention implementation: %s", attn_impl)
+                    break
+                except Exception as attn_err:
+                    if attn_impl == "sdpa":
+                        raise  # Nothing left to try
+                    logger.warning(
+                        "flash_attention_2 unavailable (%s), falling back to sdpa",
+                        attn_err,
+                    )
 
             init_time = time.time() - init_start
-            logger.info(f"NeurTTS-Air model initialized successfully in {init_time:.2f}s")
+            logger.info(
+                "Qwen3-TTS model ready in %.2fs  speaker=%s  language=%s",
+                init_time,
+                NeurTTSFactory._speaker,
+                NeurTTSFactory._language,
+            )
 
         except Exception as e:
-            logger.error(f"Failed to initialize NeurTTS-Air model: {e}")
+            logger.error("Failed to initialize Qwen3-TTS model: %s", e)
             raise
 
+    # ------------------------------------------------------------------
+    # Text pre-processing (kept from original NeuTTS factory)
+    # ------------------------------------------------------------------
+
     def _clean_text(self, text: str) -> str:
-        # Remove emojis and other non-standard characters that might confuse phonemizer
-        # Keep basic punctuation, letters, numbers, and common symbols
-        
-        # Remove references: brackets, curly braces, numbered references, URLs
+        """Remove emojis, URLs, references; normalize punctuation for TTS."""
+        # Remove references: brackets, curly braces, URLs
         text = re.sub(r'\[.*?\]', '', text)
         text = re.sub(r'\{.*?\}', '', text)
         text = re.sub(r'https?://\S+|www\.\S+', '', text)
-        # Normalize em dash (—) and en dash (–) to space-hyphen-space so words stay separate
+        # Normalize em-dash / en-dash to spaced hyphen
         text = re.sub(r'[\u2013\u2014]', ' - ', text)
-        # Keep letters, digits, whitespace, and basic punctuation; remove the rest (emojis, etc.)
+        # Keep letters, digits, whitespace, and basic punctuation; drop the rest
         text = re.sub(r'[^\w\s,.?!;\'\"\-]', '', text)
-        # Ensure every period is followed by a space (for TTS phrasing)
+        # Ensure periods and semicolons are followed by a space
         text = re.sub(r'\.(?!\s)', '. ', text)
-        # text = re.sub(r'\. ', '... ', text)
-        # Ensure every semicolon is followed by a space
         text = re.sub(r';(?!\s)', '; ', text)
-        # Normalize whitespace
+        # Collapse whitespace / newlines
         text = re.sub(r'\s+', ' ', text)
         text = re.sub(r'\n+', ' ', text)
         text = re.sub(r'\\n+', ' ', text)
-        text = re.sub(r' ', '   ', text)
-        return text
+        return text.strip()
 
-    def _split_text(self, text: str, max_length: int = 500) -> list[str]:
-        """Split text into chunks <= max_length, preferring sentence boundaries."""
+    def _split_text(self, text: str, max_length: int = MAX_CHUNK_LENGTH) -> list[str]:
+        """Split text into chunks <= *max_length*, preferring sentence boundaries."""
         if len(text) <= max_length:
             return [text]
-        
-        # Split on sentence endings (., ?, !) followed by space
-        sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|\!)\s', text)
-        
-        chunks = []
-        current_chunk = []
+
+        sentences = re.split(
+            r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|\!)\s', text
+        )
+
+        chunks: list[str] = []
+        current_chunk: list[str] = []
         current_length = 0
-        
+
         for sentence in sentences:
             sentence = sentence.strip()
             if not sentence:
                 continue
             if current_length + len(sentence) <= max_length:
                 current_chunk.append(sentence)
-                current_length += len(sentence) + 1  # +1 for space
+                current_length += len(sentence) + 1
             else:
                 if current_chunk:
                     chunks.append(' '.join(current_chunk))
                 current_chunk = [sentence]
                 current_length = len(sentence) + 1
-        
+
         if current_chunk:
             chunks.append(' '.join(current_chunk))
-        
+
         return chunks
 
+    # ------------------------------------------------------------------
+    # Generation helpers (run on executor threads)
+    # ------------------------------------------------------------------
+
+    def _synthesize_chunk(self, text_chunk: str):
+        """Call Qwen3-TTS for a single text chunk. Returns (audio_np, sample_rate)."""
+        wavs, sr = NeurTTSFactory._model.generate_custom_voice(
+            text=text_chunk,
+            language=NeurTTSFactory._language,
+            speaker=NeurTTSFactory._speaker,
+        )
+        NeurTTSFactory._sample_rate = sr
+        if wavs is None or len(wavs) == 0 or wavs[0].size == 0:
+            return None, sr
+        return wavs[0], sr
+
+    # ------------------------------------------------------------------
+    # Public API: non-streaming WAV
+    # ------------------------------------------------------------------
+
     async def generate_audio_wav(self, text: str) -> bytes:
-        """
-        Synthesize speech from text and return WAV bytes (non-streaming).
-        Splits long text into chunks to stay within the model's 2048-token limit.
-        """
+        """Synthesize speech from *text* and return complete WAV bytes."""
         if not text:
             return b""
-            
-        # Clean text before processing
+
         text = self._clean_text(text)
         if not text:
             logger.warning("Text became empty after cleaning.")
             return b""
 
-        logger.info("NEURTTS pre-split text to synthesize (full):\n%s", text)
+        logger.info("TTS text to synthesize:\n%s", text)
 
         if NeurTTSFactory._model is None:
-            self._initialize_model()
-
+            self._initialize_model(DEFAULT_MODEL)
         if NeurTTSFactory._model is None:
             logger.error("Model not initialized, cannot generate audio.")
             return b""
 
         def _generate():
-            if not self.ref_codes:
-                logger.error("No reference codes loaded. Cannot generate audio.")
-                return b""
-
             try:
-                # Split text to stay within model's 2048-token limit (≈500 chars per chunk)
                 text_chunks = self._split_text(text)
-                logger.info(f"Split into {len(text_chunks)} chunks for generate_audio_wav")
+                logger.info("Split into %d chunk(s) for WAV generation", len(text_chunks))
 
-                all_audio = []
+                all_audio: list[np.ndarray] = []
                 start_time = time.time()
 
-                for chunk_idx, text_chunk in enumerate(text_chunks):
+                for idx, chunk_text in enumerate(text_chunks):
                     logger.info(
-                        "Speech synthesizer chunk %d/%d (length=%d): %s",
-                        chunk_idx + 1,
+                        "TTS chunk %d/%d (len=%d): %s",
+                        idx + 1,
                         len(text_chunks),
-                        len(text_chunk),
-                        text_chunk[:80] + ("..." if len(text_chunk) > 80 else ""),
+                        len(chunk_text),
+                        chunk_text[:80] + ("..." if len(chunk_text) > 80 else ""),
                     )
 
-                    chunk_start = time.time()
-                    audio_array = NeurTTSFactory._model.infer(text_chunk, self.ref_codes, self.ref_text)
-                    chunk_time = time.time() - chunk_start
+                    t0 = time.time()
+                    audio, sr = self._synthesize_chunk(chunk_text)
+                    dt = time.time() - t0
 
-                    if audio_array is None or audio_array.size == 0:
-                        logger.warning("No audio for chunk %d, skipping", chunk_idx + 1)
+                    if audio is None:
+                        logger.warning("No audio for chunk %d, skipping", idx + 1)
                         continue
 
-                    all_audio.append(audio_array)
+                    all_audio.append(audio)
+                    logger.info(
+                        "Chunk %d took %.3fs, samples=%d", idx + 1, dt, audio.size
+                    )
 
-                    # Insert pause between chunks (same as streaming)
-                    if chunk_idx < len(text_chunks) - 1:
-                        pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * SAMPLE_RATE)
-                        silence = np.zeros(pause_samples, dtype=np.float32)
-                        all_audio.append(silence)
-
-                    logger.info(f"Chunk {chunk_idx + 1} took {chunk_time:.3f}s, samples={audio_array.size}")
+                    # Insert pause between chunks
+                    if idx < len(text_chunks) - 1:
+                        pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * sr)
+                        all_audio.append(np.zeros(pause_samples, dtype=np.float32))
 
                 if not all_audio:
                     logger.error("No audio data generated.")
                     return b""
 
                 audio_array = np.concatenate(all_audio)
+                sr = NeurTTSFactory._sample_rate
                 inference_time = time.time() - start_time
-
-                # Calculate metrics
-                audio_duration = len(audio_array) / SAMPLE_RATE
+                audio_duration = len(audio_array) / sr
                 rtf = inference_time / audio_duration if audio_duration > 0 else 0
+                logger.info(
+                    "Total inference %.3fs for %.2fs audio (RTF %.3f)",
+                    inference_time,
+                    audio_duration,
+                    rtf,
+                )
 
-                logger.info(f"Inference took {inference_time:.3f}s for {audio_duration:.2f}s of audio (RTF: {rtf:.3f})")
-
-                # Time the post-processing
-                post_start = time.time()
-
-                # Convert to 16-bit PCM
+                # Convert float32 [-1, 1] to 16-bit PCM WAV
                 audio_int16 = (audio_array * 32767).astype(np.int16)
-
-                # Create WAV in memory
                 wav_buffer = io.BytesIO()
                 with wave.open(wav_buffer, 'wb') as wf:
                     wf.setnchannels(1)
-                    wf.setsampwidth(2)  # 16-bit
-                    wf.setframerate(SAMPLE_RATE)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sr)
                     wf.writeframes(audio_int16.tobytes())
-
-                post_time = time.time() - post_start
-                total_time = time.time() - start_time
-
-                logger.info(f"Post-processing took {post_time:.3f}s, total {total_time:.3f}s")
 
                 return wav_buffer.getvalue()
 
             except Exception as e:
-                logger.error(f"Error during audio generation: {e}")
+                logger.error("Error during WAV generation: %s", e)
                 return b""
+            finally:
+                torch.cuda.empty_cache()
+                gc.collect()
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _generate)
-    
+        async with self._lock:
+            return await loop.run_in_executor(None, _generate)
+
+    # ------------------------------------------------------------------
+    # Public API: streaming length-prefixed PCM
+    # ------------------------------------------------------------------
+
     async def generate_audio_stream(self, text: str):
-        """
-        Synthesize speech from text and yield length-prefixed PCM audio chunks.
+        """Synthesize speech and yield length-prefixed PCM chunks.
 
-        Each yielded message is:
-          - 4 bytes: uint32 little-endian length of PCM data
-          - N bytes: 16-bit PCM audio data at 24kHz, mono
-
-        This framing allows the client to reconstruct chunk boundaries
-        that would otherwise be lost in HTTP chunked transfer encoding.
+        Each yielded message:
+          4 bytes  -- uint32 LE length of the following PCM payload
+          N bytes  -- 16-bit PCM audio data (mono)
         """
         if not text:
             return
-            
-        # Clean text before processing
+
         text = self._clean_text(text)
         if not text:
             logger.warning("Text became empty after cleaning.")
             return
 
-        logger.info("NEURTTS pre-split text to synthesize (full):\n%s", text)
+        logger.info("TTS streaming text:\n%s", text)
 
         if NeurTTSFactory._model is None:
-            self._initialize_model()
-
+            self._initialize_model(DEFAULT_MODEL)
         if NeurTTSFactory._model is None:
             logger.error("Model not initialized, cannot generate audio.")
             return
 
-        if not self.ref_codes:
-            logger.error("No reference codes loaded. Cannot generate audio.")
-            return
-        
         start_time = time.time()
-        logger.info(f"Starting streaming audio generation for text length: {len(text)}")
-        
-        # Split text if too long
         text_chunks = self._split_text(text)
-        logger.info(f"Split into {len(text_chunks)} chunks")
+        logger.info("Split into %d chunk(s) for streaming", len(text_chunks))
 
-        # When set (client disconnected or stream closed), stop generating more chunks.
         cancel_event = threading.Event()
 
         def _stream_generator():
-            chunk_count = 0
+            """Synchronous generator executed inside a thread-pool executor."""
+            sub_chunk_count = 0
             first_chunk_time = None
             try:
-                for text_chunk_idx, text_chunk in enumerate(text_chunks):
+                for tc_idx, chunk_text in enumerate(text_chunks):
                     if cancel_event.is_set():
-                        logger.info("Streaming audio cancelled (client disconnected).")
+                        logger.info("Streaming cancelled (client disconnected).")
                         break
-                    # Insert pause between sentences when we split: add silence after previous chunk
-                    if text_chunk_idx > 0:
-                        pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * SAMPLE_RATE)
-                        silence = np.zeros(pause_samples, dtype=np.float32)
-                        silence_int16 = (silence * 32767).astype(np.int16)
+
+                    # Insert silence between text segments
+                    if tc_idx > 0:
+                        sr = NeurTTSFactory._sample_rate
+                        pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * sr)
+                        silence_int16 = np.zeros(pause_samples, dtype=np.int16)
                         pause_bytes = silence_int16.tobytes()
                         yield struct.pack('<I', len(pause_bytes)) + pause_bytes
 
-                    for chunk in NeurTTSFactory._model.infer_stream(text_chunk, self.ref_codes, self.ref_text):
+                    logger.info(
+                        "Streaming TTS chunk %d/%d (len=%d): %s",
+                        tc_idx + 1,
+                        len(text_chunks),
+                        len(chunk_text),
+                        chunk_text[:80] + ("..." if len(chunk_text) > 80 else ""),
+                    )
+
+                    audio, sr = self._synthesize_chunk(chunk_text)
+                    if audio is None:
+                        logger.warning("No audio for chunk %d", tc_idx + 1)
+                        continue
+
+                    # Break audio into sub-chunks for smoother streaming
+                    for offset in range(0, len(audio), AUDIO_STREAM_SUB_CHUNK_SAMPLES):
                         if cancel_event.is_set():
                             break
-                        if chunk is None or chunk.size == 0:
-                            continue
-                        chunk_count += 1
-                        
-                        # Track time to first chunk
-                        if chunk_count == 1:
-                            first_chunk_time = time.time()
-                            ttfc = first_chunk_time - start_time
-                            logger.info(f"Time to first chunk: {ttfc:.3f}s")
-                        
-                        # Log chunk info for debugging
-                        if chunk_count <= 3:
-                            logger.info(f"Chunk {chunk_count}: shape={chunk.shape}, dtype={chunk.dtype}, "
-                                      f"min={chunk.min():.3f}, max={chunk.max():.3f}, samples={chunk.size}")
+                        sub = audio[offset : offset + AUDIO_STREAM_SUB_CHUNK_SAMPLES]
+                        sub_chunk_count += 1
 
-                        # Convert float32 [-1, 1] to int16 PCM (same as example code)
-                        audio_int16 = (chunk * 32767).astype(np.int16)
-                        pcm_bytes = audio_int16.tobytes()
-                        
-                        # Prefix with 4-byte length (uint32 little-endian)
-                        length_prefix = struct.pack('<I', len(pcm_bytes))
-                        yield length_prefix + pcm_bytes
-                
-                total_time = time.time() - start_time
-                avg_chunk_time = (time.time() - first_chunk_time) / chunk_count if first_chunk_time else 0
+                        if sub_chunk_count == 1:
+                            first_chunk_time = time.time()
+                            logger.info(
+                                "Time to first chunk: %.3fs",
+                                first_chunk_time - start_time,
+                            )
+
+                        pcm_int16 = (sub * 32767).astype(np.int16)
+                        pcm_bytes = pcm_int16.tobytes()
+                        yield struct.pack('<I', len(pcm_bytes)) + pcm_bytes
+
+                    # Release GPU memory between text chunks
+                    torch.cuda.empty_cache()
+
+                total = time.time() - start_time
                 logger.info(
-                    f"Finished streaming {chunk_count} chunks in {total_time:.3f}s "
-                    f"(avg: {avg_chunk_time:.3f}s/chunk)"
+                    "Finished streaming %d sub-chunks in %.3fs", sub_chunk_count, total
                 )
 
             except Exception as e:
-                if _is_client_interrupt_error(e):
-                    logger.info("Streaming audio stopped (client interrupted or disconnected): %s", e)
+                if _is_client_disconnect(e):
+                    logger.info("Streaming stopped (client interrupted): %s", e)
                 else:
-                    logger.error("Error during streaming audio generation: %s", e)
-        
-        # Run the sync generator in a single executor thread (generators must not cross threads)
-        # and pass chunks to the async generator via a thread-safe queue.
+                    logger.error("Error during streaming generation: %s", e)
+            finally:
+                gc.collect()
+
+        # Bridge sync generator ➜ async generator via thread-safe queue
         async with self._lock:
             loop = asyncio.get_running_loop()
-            chunk_queue = queue.Queue()
+            chunk_queue: queue.Queue = queue.Queue()
 
-        def producer():
+            def producer():
+                try:
+                    for framed in _stream_generator():
+                        chunk_queue.put(framed)
+                except Exception as e:
+                    if _is_client_disconnect(e):
+                        logger.info("Stream producer stopped (client interrupted): %s", e)
+                    else:
+                        logger.error("Stream producer error: %s", e)
+                finally:
+                    chunk_queue.put(None)  # sentinel
+
+            producer_future = loop.run_in_executor(None, producer)
             try:
-                for framed_chunk in _stream_generator():
-                    chunk_queue.put(framed_chunk)
-            except Exception as e:
-                if _is_client_interrupt_error(e):
-                    logger.info("Stream producer stopped (client interrupted or disconnected): %s", e)
-                else:
-                    logger.error("Error in stream producer: %s", e)
+                while True:
+                    chunk = await loop.run_in_executor(None, chunk_queue.get)
+                    if chunk is None:
+                        break
+                    yield chunk
             finally:
-                chunk_queue.put(None)
+                cancel_event.set()
+                try:
+                    await producer_future
+                except Exception:
+                    pass
 
-        producer_future = loop.run_in_executor(None, producer)
-        try:
-            while True:
-                chunk = await loop.run_in_executor(None, chunk_queue.get)
-                if chunk is None:
-                    break
-                yield chunk
-        finally:
-            # Signal producer to stop (client disconnected or stream finished).
-            cancel_event.set()
-            try:
-                await producer_future
-            except Exception:
-                pass
 
-# Create global instance
+# Global singleton
 neurtts_factory = NeurTTSFactory()

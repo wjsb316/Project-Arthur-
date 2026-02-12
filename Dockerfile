@@ -1,100 +1,3 @@
-# # Stage 0: Frontend Builder
-# FROM node:22-alpine AS frontend-builder
-# WORKDIR /frontend
-# COPY frontend/package*.json ./
-# RUN npm install
-# COPY frontend/ .
-# RUN npm run build
-
-# # Stage 1: Builder (with CUDA compiler)
-# # We use the 'devel' tag which includes nvcc (needed to compile llama-cpp-python with GPU support)
-# FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-devel AS builder
-
-# WORKDIR /build
-
-# # Install build tools
-# RUN apt-get update && apt-get install -y \
-#     git \
-#     build-essential \
-#     cmake \
-#     && rm -rf /var/lib/apt/lists/*
-
-# # Copy requirements to build wheels
-# COPY requirements.txt .
-
-# # Build llama-cpp-python wheel with CUDA support enabled
-# # -DGGML_CUDA=on enables CUDA kernels
-# RUN CMAKE_ARGS="-DGGML_CUDA=on" pip wheel --no-cache-dir --wheel-dir /build/wheels llama-cpp-python==0.3.16
-
-
-# # Stage 2: Runtime (Slim final image)
-# FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
-
-# # Install runtime system dependencies including Avahi for mDNS
-# RUN apt-get update && apt-get install -y \
-#     git \
-#     nano \
-#     espeak-ng \
-#     avahi-daemon \
-#     avahi-utils \
-#     dbus \
-#     cmake \
-#     portaudio19-dev \
-#     build-essential \
-#     && rm -rf /var/lib/apt/lists/*
-
-# # # Ensure CUDA libraries are in LD_LIBRARY_PATH
-# # # We add both the standard system location and the python package location found in this specific image
-# # ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH}
-
-# # # Create a symlink for libcudart.so.11.0 pointing to libcudart.so.12
-# # # This is a workaround for gpt4all/llama-cpp binding explicitly looking for version 11
-# # RUN ln -s /opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.12 \
-# #     /opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.11.0
-
-
-# # Configure Avahi to run in container
-# RUN sed -i 's/#enable-dbus=yes/enable-dbus=yes/' /etc/avahi/avahi-daemon.conf && \
-#     sed -i 's/rlimit-nproc=3/#rlimit-nproc=3/' /etc/avahi/avahi-daemon.conf
-
-# # Set the working directory
-# WORKDIR /app
-# # ENV PYTHONPATH="${PYTHONPATH}:/app"
-
-# # Copy built wheels from the builder stage
-# COPY --from=builder /build/wheels /wheels
-
-# # Copy requirements file
-# COPY requirements.txt .
-
-# # Install dependencies
-# # 1. Install llama-cpp-python specifically from our built wheels (force no PyPI lookup for this package)
-# # 2. Install the rest from requirements.txt
-# RUN pip install --no-cache-dir --no-index --find-links=/wheels llama-cpp-python==0.3.16 && \
-#     pip install --no-cache-dir -r requirements.txt
-
-# # RUN pip install llama-cpp-python --force-reinstall --no-cache-dir --upgrade && \
-#     # pip install --no-cache-dir -r requirements.txt
-
-# # Copy frontend build to a system location preserved during volume mounts
-# COPY --from=frontend-builder /frontend/dist /usr/share/app/static
-
-# # Copy app code
-# COPY . .
-
-# # Copy and setup entrypoint
-# COPY entrypoint.sh /entrypoint.sh
-# RUN chmod +x /entrypoint.sh
-
-# # Copy mDNS service definition
-# COPY arthur.service /etc/avahi/services/arthur.service
-
-# # Expose mDNS port
-# EXPOSE 5353/udp
-
-# ENTRYPOINT ["/entrypoint.sh"]
-
-
 # Stage 0: Frontend Builder
 FROM node:22-alpine AS frontend-builder
 WORKDIR /frontend
@@ -103,45 +6,40 @@ RUN npm install
 COPY frontend/ .
 RUN npm run build
 
-# Stage 1: Builder (with CUDA compiler)
-FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-devel AS builder
+# Stage 1: Build flash-attn wheel (optional but recommended for ~2x TTS speedup)
+# This needs nvcc from the devel image.  The wheel is copied into the runtime
+# stage below.  Comment out this stage and the COPY --from=flash-builder line
+# if your GPU does not support FlashAttention 2 (requires Ampere / sm_80+).
+FROM pytorch/pytorch:2.10.0-cuda12.8-cudnn9-devel AS flash-builder
+# Allow pip to install into the system Python — this stage is throwaway (only the .whl is kept).
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+# flash-attn's setup.py needs git; the 2.10.0 devel image doesn't ship it.
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir packaging ninja
+# MAX_JOBS=1 keeps peak RAM under ~4 GB so WSL doesn't OOM.
+# Raise to 2 if you have >=16 GB available; avoid 4+ on memory-constrained WSL.
+# --no-build-isolation → build against the torch already in the image.
+# --no-deps          → don't resolve runtime deps; we only need the compiled .whl.
+RUN MAX_JOBS=1 pip wheel --no-cache-dir --no-deps --wheel-dir /wheels flash-attn --no-build-isolation
 
-WORKDIR /build
-
-# Install build tools
-RUN apt-get update && apt-get install -y \
-    git \
-    build-essential \
-    cmake \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-
-# Build llama-cpp-python wheel with CUDA support enabled
-RUN CMAKE_ARGS="-DGGML_CUDA=on" pip wheel --no-cache-dir --wheel-dir /build/wheels llama-cpp-python==0.3.16
-
-
-# Stage 2: Runtime (Slim final image)
-FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
+# Stage 2: Runtime
+FROM pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime
 
 # Install runtime system dependencies
-# ADDED: libjemalloc2 for memory management
+# build-essential (gcc) is required at runtime by PyTorch's Triton JIT compiler
+# (used by sentence-transformers / torch.compile for embedding generation).
+# sox is used by Qwen3-TTS for audio processing.
 RUN apt-get update && apt-get install -y \
     git \
     nano \
     espeak-ng \
+    sox \
     avahi-daemon \
     avahi-utils \
     dbus \
-    cmake \
-    portaudio19-dev \
     build-essential \
     python3-venv \
-    libjemalloc2 \
     && rm -rf /var/lib/apt/lists/*
-
-# ADDED: Force the OS to use jemalloc instead of glibc malloc to prevent memory leaks
-ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 
 # Configure Avahi to run in container
 RUN sed -i 's/#enable-dbus=yes/enable-dbus=yes/' /etc/avahi/avahi-daemon.conf && \
@@ -149,24 +47,42 @@ RUN sed -i 's/#enable-dbus=yes/enable-dbus=yes/' /etc/avahi/avahi-daemon.conf &&
 
 WORKDIR /app
 
+# Persist HuggingFace model cache inside /app so it survives container restarts
+# when /app is bind-mounted from the host.
+ENV HF_HOME=/app/.cache/huggingface
+
+# Create a venv that inherits PyTorch from the base image
 ENV VENV_PATH=/opt/venv
 RUN python -m venv --system-site-packages ${VENV_PATH}
 ENV PATH="${VENV_PATH}/bin:${PATH}"
 
-COPY --from=builder /build/wheels /wheels
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir --no-index --find-links=/wheels llama-cpp-python==0.3.16 && \
-    pip install --no-cache-dir -r requirements.txt
+# Lock torch/CUDA/triton packages from the base image so pip won't re-download
+# them. Strip the +cu128 local version tag — pip can't match it against PyPI.
+RUN pip freeze | grep -iE '^(torch|nvidia|triton|cuda)' | grep '==' \
+    | sed 's/+cu[0-9]*//' > /tmp/base-constraints.txt
+RUN pip install --no-cache-dir -c /tmp/base-constraints.txt -r requirements.txt
 
+# Install the pre-built flash-attn wheel from Stage 1.
+# Comment out the next two lines if you skipped the flash-builder stage.
+COPY --from=flash-builder /wheels /tmp/flash-wheels
+RUN pip install --no-cache-dir /tmp/flash-wheels/*.whl && rm -rf /tmp/flash-wheels
+
+# Copy frontend build
 COPY --from=frontend-builder /frontend/dist /usr/share/app/static
+
+# Copy app code
 COPY . .
 
+# Copy and setup entrypoint
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Copy mDNS service definition
 COPY arthur.service /etc/avahi/services/arthur.service
 
+# Expose mDNS port
 EXPOSE 5353/udp
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -38,9 +38,15 @@ class Settings(BaseSettings):
     # System prompt used when the user is in a voice conversation (input=voice, output=TTS).
     # If unset, a default voice-optimized prompt is used in the agent graph.
     voice_system_prompt: str | None = None
-    # When True, /voice/stream skips TTS and returns JSON (for memory-leak troubleshooting).
+    # When True, /voice/stream skips TTS and returns JSON (useful for debugging).
     # Set ARTHUR_SKIP_SPEECH_SYNTHESIS=false to restore audio streaming.
     skip_speech_synthesis: bool = False
+
+    # Qwen3-TTS settings
+    # 0.6B is ~3x faster than 1.7B; use 1.7B if you need instruction control.
+    tts_model: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+    tts_speaker: str = "Ryan"       # See Qwen3-TTS docs for available speakers
+    tts_language: str = "English"   # Default synthesis language
 
     class Config:
         env_prefix = "ARTHUR_"

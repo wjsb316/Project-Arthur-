@@ -299,7 +299,7 @@ def build_chat_router(
                         "X-Transcribed-Text": transcribed_text,
                         "X-Model-Generation-Complete": "true",  # Indicates model has finished generating before audio starts
                         "X-Audio-Format": "pcm16-length-prefixed",  # 4-byte uint32 LE length + PCM data
-                        "X-Audio-Sample-Rate": "24000",
+                        "X-Audio-Sample-Rate": str(neurtts_factory.sample_rate),
                         "X-Audio-Channels": "1",
                         "Cache-Control": "no-cache",
                         "X-Accel-Buffering": "no",  # Disable nginx buffering if present

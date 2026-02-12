@@ -73,10 +73,14 @@ def create_app(
     set_config_path(settings.memory_db_path.parent / "config_overrides.json")
     load_persisted()
 
-    # Initialize TTS model synchronously when app is created (before lifespan).
+    # Initialize Qwen3-TTS model synchronously when app is created (before lifespan).
     # With uvicorn --factory, create_app runs before the server accepts connections,
     # so the model is loaded once and ready before any requests arrive.
-    neurtts_factory.initialize()
+    neurtts_factory.initialize(
+        model_name=settings.tts_model,
+        speaker=settings.tts_speaker,
+        language=settings.tts_language,
+    )
 
     # Use the ORM-based MemoryStore (similarity threshold from runtime config)
     memory = memory_store or MemoryStore(session_maker)
