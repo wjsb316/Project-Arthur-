@@ -176,6 +176,8 @@ def build_chat_router(
     @router.post("/voice")
     async def voice_chat(
         file: UploadFile = File(...),
+        session_id: Optional[int] = Query(None, description="Continue this chat session (e.g. from chat window)"),
+        new_session: bool = Query(False, description="Start a new chat session (e.g. user clicked New Chat)"),
         user: User = Depends(get_current_user),
     ):
         try:
@@ -201,8 +203,8 @@ def build_chat_router(
                 result = await _process_chat_core(
                     text_input=transcribed_text,
                     user=user,
-                    new_session=False,
-                    session_id=None,
+                    new_session=new_session,
+                    session_id=None if new_session else session_id,
                     is_voice=True,
                 )
 

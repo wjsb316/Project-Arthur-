@@ -154,31 +154,18 @@ export function useVoiceRecording(
               while (true) {
                 const { done, value } = await reader.read();
                 if (done) {
-                  // Process any remaining buffered data
                   for (const pcmData of processBuffer()) {
                     const audioBuffer = createAudioBuffer(pcmData);
                     if (audioBuffer) scheduleAudioBuffer(audioBuffer);
                   }
-                  
-                  // Stream is complete - wait for all scheduled audio to finish playing
-                  // The last source scheduled will finish at nextStartTime
                   if (audioSourcesRef.current.length > 0) {
                     const lastScheduledEndTime = nextStartTime;
                     const now = audioContext.currentTime;
                     const timeUntilLastEnds = Math.max(0, lastScheduledEndTime - now);
-                    
-                    // Find the source that ends last (the one we just scheduled after processing remaining data)
                     const lastSource = audioSourcesRef.current[audioSourcesRef.current.length - 1];
-                    lastSource.onended = () => {
-                      setIsVoiceProcessing(false);
-                    };
-                    
-                    // Fallback timeout in case onended doesn't fire
-                    setTimeout(() => {
-                      setIsVoiceProcessing(false);
-                    }, (timeUntilLastEnds * 1000) + 100); // Add 100ms buffer
+                    lastSource.onended = () => setIsVoiceProcessing(false);
+                    setTimeout(() => setIsVoiceProcessing(false), (timeUntilLastEnds * 1000) + 100);
                   } else {
-                    // No audio was scheduled, turn off immediately
                     setIsVoiceProcessing(false);
                   }
                   break;

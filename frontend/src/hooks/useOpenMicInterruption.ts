@@ -143,20 +143,13 @@ export function useOpenMicInterruption({
                     const audioBuffer = createAudioBuffer(pcmData);
                     if (audioBuffer) scheduleAudioBuffer(audioBuffer);
                   }
-
                   if (audioSourcesRef.current.length > 0) {
                     const lastScheduledEndTime = nextStartTime;
                     const now = audioContext.currentTime;
                     const timeUntilLastEnds = Math.max(0, lastScheduledEndTime - now);
-
                     const lastSource = audioSourcesRef.current[audioSourcesRef.current.length - 1];
-                    lastSource.onended = () => {
-                      onVoiceProcessingChange(false);
-                    };
-
-                    setTimeout(() => {
-                      onVoiceProcessingChange(false);
-                    }, (timeUntilLastEnds * 1000) + 100);
+                    lastSource.onended = () => onVoiceProcessingChange(false);
+                    setTimeout(() => onVoiceProcessingChange(false), (timeUntilLastEnds * 1000) + 100);
                   } else {
                     onVoiceProcessingChange(false);
                   }

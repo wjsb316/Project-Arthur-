@@ -84,6 +84,14 @@ class NeurTTSFactory:
                 codec_device="cpu",  # ONNX on CPU requred for chunks streaming
             )
 
+            # Transmission of wav file
+            # NeurTTSFactory._model = NeuTTSAir(
+            #     backbone_repo="neuphonic/neutts-air",
+            #     backbone_device="cuda",
+            #     codec_repo="neuphonic/neucodec",
+            #     codec_device="cuda",
+            # )
+
             logger.info("GGUF model initialized with full GPU offloading (n_gpu_layers=-1)")
 
             # Load default reference
@@ -172,6 +180,7 @@ class NeurTTSFactory:
     async def generate_audio_wav(self, text: str) -> bytes:
         """
         Synthesize speech from text and return WAV bytes (non-streaming).
+        Splits long text into chunks to stay within the model's 2048-token limit.
         """
         if not text:
             return b""
@@ -197,26 +206,52 @@ class NeurTTSFactory:
                 return b""
 
             try:
-                logger.info(
-                    "Speech synthesizer input (length=%d):\n%s",
-                    len(text),
-                    text,
-                )
+                # Split text to stay within model's 2048-token limit (≈500 chars per chunk)
+                text_chunks = self._split_text(text)
+                logger.info(f"Split into {len(text_chunks)} chunks for generate_audio_wav")
 
-                # Time the actual inference
+                all_audio = []
                 start_time = time.time()
-                audio_array = NeurTTSFactory._model.infer(text, self.ref_codes, self.ref_text)
+
+                for chunk_idx, text_chunk in enumerate(text_chunks):
+                    logger.info(
+                        "Speech synthesizer chunk %d/%d (length=%d): %s",
+                        chunk_idx + 1,
+                        len(text_chunks),
+                        len(text_chunk),
+                        text_chunk[:80] + ("..." if len(text_chunk) > 80 else ""),
+                    )
+
+                    chunk_start = time.time()
+                    audio_array = NeurTTSFactory._model.infer(text_chunk, self.ref_codes, self.ref_text)
+                    chunk_time = time.time() - chunk_start
+
+                    if audio_array is None or audio_array.size == 0:
+                        logger.warning("No audio for chunk %d, skipping", chunk_idx + 1)
+                        continue
+
+                    all_audio.append(audio_array)
+
+                    # Insert pause between chunks (same as streaming)
+                    if chunk_idx < len(text_chunks) - 1:
+                        pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * SAMPLE_RATE)
+                        silence = np.zeros(pause_samples, dtype=np.float32)
+                        all_audio.append(silence)
+
+                    logger.info(f"Chunk {chunk_idx + 1} took {chunk_time:.3f}s, samples={audio_array.size}")
+
+                if not all_audio:
+                    logger.error("No audio data generated.")
+                    return b""
+
+                audio_array = np.concatenate(all_audio)
                 inference_time = time.time() - start_time
 
                 # Calculate metrics
-                audio_duration = len(audio_array) / 24000  # 24kHz sample rate
+                audio_duration = len(audio_array) / SAMPLE_RATE
                 rtf = inference_time / audio_duration if audio_duration > 0 else 0
 
                 logger.info(f"Inference took {inference_time:.3f}s for {audio_duration:.2f}s of audio (RTF: {rtf:.3f})")
-
-                if audio_array is None or audio_array.size == 0:
-                    logger.error("No audio data generated.")
-                    return b""
 
                 # Time the post-processing
                 post_start = time.time()
@@ -229,7 +264,7 @@ class NeurTTSFactory:
                 with wave.open(wav_buffer, 'wb') as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)  # 16-bit
-                    wf.setframerate(24000)
+                    wf.setframerate(SAMPLE_RATE)
                     wf.writeframes(audio_int16.tobytes())
 
                 post_time = time.time() - post_start
