@@ -89,6 +89,8 @@ export function useVoiceRecording(
           const sessionId = res.headers.get('X-Session-ID');
           const contentType = res.headers.get('Content-Type') ?? '';
           const transcribedText = res.headers.get('X-Transcribed-Text');
+          const sampleRateHeader = res.headers.get('X-Audio-Sample-Rate');
+          const sampleRate = sampleRateHeader ? parseInt(sampleRateHeader, 10) : 24000;
           if (sessionId) {
             setCurrentSessionId(parseInt(sessionId));
             setIsNewSession(false);
@@ -104,16 +106,15 @@ export function useVoiceRecording(
             try {
               const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
               audioContextRef.current = audioContext;
-              const sampleRate = 24000;
               const reader = res.body.getReader();
               let nextStartTime = 0;
               let chunkCount = 0;
               let playbackStarted = false;
-              const bufferChunks = 1;
               const bufferedAudioBuffers: AudioBuffer[] = [];
               let pendingBytes = new Uint8Array(0);
 
               const createAudioBuffer = (pcmData: Uint8Array): AudioBuffer | null => {
+                if (pcmData.length === 0) return null;
                 if (pcmData.length % 2 !== 0) return null;
                 const alignedBuffer = new ArrayBuffer(pcmData.length);
                 new Uint8Array(alignedBuffer).set(pcmData);
@@ -154,8 +155,9 @@ export function useVoiceRecording(
               while (true) {
                 const { done, value } = await reader.read();
                 if (done) {
-                  for (const pcmData of processBuffer()) {
-                    const audioBuffer = createAudioBuffer(pcmData);
+              for (const pcmData of processBuffer()) {
+                if (pcmData.length === 0) continue;
+                const audioBuffer = createAudioBuffer(pcmData);
                     if (audioBuffer) scheduleAudioBuffer(audioBuffer);
                   }
                   if (audioSourcesRef.current.length > 0) {
@@ -175,14 +177,17 @@ export function useVoiceRecording(
                   newBuffer.set(pendingBytes);
                   newBuffer.set(value, pendingBytes.length);
                   pendingBytes = newBuffer;
-                  for (const pcmData of processBuffer()) {
-                    const audioBuffer = createAudioBuffer(pcmData);
+              for (const pcmData of processBuffer()) {
+                if (pcmData.length === 0) continue;
+                const audioBuffer = createAudioBuffer(pcmData);
                     if (!audioBuffer) continue;
                     if (!playbackStarted) {
                       bufferedAudioBuffers.push(audioBuffer);
-                      if (bufferedAudioBuffers.length >= bufferChunks) {
+                      // Buffer ~0.5s of audio
+                      const currentDuration = bufferedAudioBuffers.reduce((acc, b) => acc + b.duration, 0);
+                      if (currentDuration >= 0.5) {
                         playbackStarted = true;
-                        nextStartTime = audioContext.currentTime + 0.05;
+                        nextStartTime = audioContext.currentTime + 0.1;
                         for (const buf of bufferedAudioBuffers) scheduleAudioBuffer(buf);
                         bufferedAudioBuffers.length = 0;
                       }

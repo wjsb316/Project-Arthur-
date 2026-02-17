@@ -48,7 +48,8 @@ PAUSE_BETWEEN_CHUNKS_SEC = 0
 
 # Maximum characters per text chunk sent to the model.  Smaller chunks give
 # faster time-to-first-audio at the cost of slightly more overhead.
-MAX_CHUNK_LENGTH = 250
+# Increased to 5000 to prefer natural prosody over latency for typical responses.
+MAX_CHUNK_LENGTH = 5000
 
 # When streaming, break each generated audio segment into sub-chunks of this
 # many samples so the client receives data more frequently.
@@ -134,14 +135,31 @@ class NeurTTSFactory:
                 logger.info("Enabling streaming optimizations (torch.compile + CUDA graphs)...")
                 try:
                     NeurTTSFactory._model.enable_streaming_optimizations(
-                        decode_window_frames=80,
+                        decode_window_frames=200,
                         use_compile=True,
                         compile_mode="reduce-overhead",
                         use_fast_codebook=True,
                         compile_codebook_predictor=True,
                         compile_talker=True,
+                        use_cuda_graphs=True,
                     )
                     logger.info("Streaming optimizations enabled.")
+
+                    # Warmup run to trigger compilation
+                    logger.info("Running warmup inference to trigger compilation...")
+                    warmup_start = time.time()
+                    try:
+                        # Use a short text for warmup
+                        warmup_text = "Warmup."
+                        # We use the internal stream generator to trigger the compiled paths
+                        # Just consume the generator
+                        warmup_gen = self._stream_generate_custom_voice(warmup_text)
+                        for _ in warmup_gen:
+                            pass
+                        logger.info("Warmup complete in %.2fs", time.time() - warmup_start)
+                    except Exception as w_err:
+                        logger.warning("Warmup failed (non-fatal): %s", w_err)
+
                 except Exception as e:
                     logger.warning("Failed to enable streaming optimizations: %s", e)
             else:
@@ -304,6 +322,7 @@ class NeurTTSFactory:
                 )
 
                 # Convert float32 [-1, 1] to 16-bit PCM WAV
+                audio_array = np.clip(audio_array, -1.0, 1.0)
                 audio_int16 = (audio_array * 32767).astype(np.int16)
                 wav_buffer = io.BytesIO()
                 with wave.open(wav_buffer, 'wb') as wf:
@@ -330,16 +349,37 @@ class NeurTTSFactory:
     # ------------------------------------------------------------------
 
     def _stream_generate_custom_voice(self, text: str):
-        """Streaming generation for CustomVoice model."""
+        """Streaming generation for CustomVoice model using stream_generate_voice_clone.
+        
+        Since 'stream_generate_custom_voice' is missing, we adapt 'stream_generate_voice_clone'
+        by providing a dummy prompt and ensuring the model uses its internal speaker embeddings.
+        """
         model_wrapper = NeurTTSFactory._model
+        
+        # In Qwen3-TTS, custom voices (finetuned speakers) are handled by passing the speaker name.
+        # However, the streaming API only exposes 'stream_generate_voice_clone'.
+        # We can trick it by passing None or a dummy prompt if the underlying model supports it,
+        # OR we might need to manually call the lower-level 'stream_generate_pcm' correctly.
+        
+        # Let's try to use the lower-level 'stream_generate_pcm' on the inner model again,
+        # but ensuring arguments match exactly what 'stream_generate_voice_clone' does internally.
         
         # 1. Validation and Setup
         language = NeurTTSFactory._language
         speaker = NeurTTSFactory._speaker
         
-        # 2. Tokenization
+        # 2. Tokenization - matching how generate_custom_voice does it
         input_text = model_wrapper._build_assistant_text(text)
         input_ids = model_wrapper._tokenize_texts([input_text])
+        
+        # For custom voice, instruct_ids should be None (or handled internally).
+        # But stream_generate_pcm expects a list.
+        # Let's check if we can pass [None] safely if we ensure input_ids is on device.
+        
+        # CRITICAL FIX: Move tensors to device!
+        # The high-level generate methods move tensors to device. We must do it manually here.
+        device = model_wrapper.model.device
+        input_ids = input_ids.to(device)
         
         instruct_ids = [None] # Default for custom voice
         
@@ -349,8 +389,9 @@ class NeurTTSFactory:
             instruct_ids=instruct_ids,
             languages=[language],
             speakers=[speaker],
-            emit_every_frames=4, # Default from example
-            decode_window_frames=80, # Default from example
+            emit_every_frames=4, 
+            decode_window_frames=80,
+            overlap_samples=0,
             use_optimized_decode=True
         )
         
@@ -380,7 +421,8 @@ class NeurTTSFactory:
             return
 
         start_time = time.time()
-        text_chunks = self._split_text(text)
+        # text_chunks = self._split_text(text)
+        text_chunks = [text]
         logger.info("Split into %d chunk(s) for streaming", len(text_chunks))
 
         cancel_event = threading.Event()
@@ -399,9 +441,10 @@ class NeurTTSFactory:
                     if tc_idx > 0:
                         sr = NeurTTSFactory._sample_rate
                         pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * sr)
-                        silence_int16 = np.zeros(pause_samples, dtype=np.int16)
-                        pause_bytes = silence_int16.tobytes()
-                        yield struct.pack('<I', len(pause_bytes)) + pause_bytes
+                        if pause_samples > 0:
+                            silence_int16 = np.zeros(pause_samples, dtype=np.int16)
+                            pause_bytes = silence_int16.tobytes()
+                            yield struct.pack('<I', len(pause_bytes)) + pause_bytes
 
                     logger.info(
                         "Streaming TTS chunk %d/%d (len=%d): %s",
@@ -433,13 +476,23 @@ class NeurTTSFactory:
                                 if NeurTTSFactory._sample_rate != sr:
                                     NeurTTSFactory._sample_rate = sr
                                 
-                                pcm_int16 = (chunk * 32767).astype(np.int16)
-                                pcm_bytes = pcm_int16.tobytes()
-                                yield struct.pack('<I', len(pcm_bytes)) + pcm_bytes
+                                if chunk.size > 0:
+                                    pcm_int16 = (np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16)
+                                    pcm_bytes = pcm_int16.tobytes()
+                                    # logger.info("Yielding optimized chunk %d size %d", sub_chunk_count, len(pcm_bytes))
+                                    yield struct.pack('<I', len(pcm_bytes)) + pcm_bytes
+                            
+                            if streaming_supported:
+                                # If we finished a chunk via streaming, we're done with this text chunk
+                                # Release GPU memory between text chunks
+                                # torch.cuda.empty_cache()
+                                continue
+
                     except Exception as e:
                         if streaming_supported:
                              # If we started streaming and failed, log error
-                             logger.error("Error during optimized streaming: %s", e)
+                             import traceback
+                             logger.error("Error during optimized streaming: %s\n%s", e, traceback.format_exc())
                              # If we haven't yielded anything for this chunk yet, we could fallback,
                              # but mixing streaming and non-streaming in one request might be tricky.
                              # For now, just log and continue (which might mean silence for this chunk).
@@ -469,12 +522,12 @@ class NeurTTSFactory:
                                     first_chunk_time - start_time,
                                 )
 
-                            pcm_int16 = (sub * 32767).astype(np.int16)
+                            pcm_int16 = (np.clip(sub, -1.0, 1.0) * 32767).astype(np.int16)
                             pcm_bytes = pcm_int16.tobytes()
                             yield struct.pack('<I', len(pcm_bytes)) + pcm_bytes
 
                     # Release GPU memory between text chunks
-                    torch.cuda.empty_cache()
+                    # torch.cuda.empty_cache()
 
                 total = time.time() - start_time
                 logger.info(
@@ -497,6 +550,7 @@ class NeurTTSFactory:
             def producer():
                 try:
                     for framed in _stream_generator():
+                        # logger.info("Producer: putting chunk of size %d", len(framed))
                         chunk_queue.put(framed)
                 except Exception as e:
                     if _is_client_disconnect(e):
@@ -504,6 +558,7 @@ class NeurTTSFactory:
                     else:
                         logger.error("Stream producer error: %s", e)
                 finally:
+                    # logger.info("Producer: finished")
                     chunk_queue.put(None)  # sentinel
 
             producer_future = loop.run_in_executor(None, producer)
@@ -511,7 +566,9 @@ class NeurTTSFactory:
                 while True:
                     chunk = await loop.run_in_executor(None, chunk_queue.get)
                     if chunk is None:
+                        # logger.info("Consumer: received sentinel, finishing")
                         break
+                    # logger.info("Consumer: yielding chunk of size %d", len(chunk))
                     yield chunk
             finally:
                 cancel_event.set()
