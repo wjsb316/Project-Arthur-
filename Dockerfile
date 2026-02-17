@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y \
     nano \
     espeak-ng \
     sox \
+    libsox-fmt-all \
     avahi-daemon \
     avahi-utils \
     dbus \
