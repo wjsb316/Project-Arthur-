@@ -135,9 +135,9 @@ class NeurTTSFactory:
                 logger.info("Enabling streaming optimizations (torch.compile + CUDA graphs)...")
                 try:
                     NeurTTSFactory._model.enable_streaming_optimizations(
-                        decode_window_frames=200,
+                        decode_window_frames=160,
                         use_compile=True,
-                        compile_mode="reduce-overhead",
+                        compile_mode="default",
                         use_fast_codebook=True,
                         compile_codebook_predictor=True,
                         compile_talker=True,
@@ -201,10 +201,17 @@ class NeurTTSFactory:
         return text.strip()
 
     def _split_text(self, text: str, max_length: int = MAX_CHUNK_LENGTH) -> list[str]:
-        """Split text into chunks <= *max_length*, preferring sentence boundaries."""
+        """Split text into chunks, grouping multiple sentences together to improve prosody.
+
+        Instead of splitting strictly by character length, we group sentences together
+        (e.g. every 2-3 sentences) to allow the model to generate better intonation
+        across sentence boundaries, while still respecting max_length.
+        """
         if len(text) <= max_length:
             return [text]
 
+        # Split by sentence boundaries (periods, question marks, exclamation marks)
+        # Regex looks for punctuation followed by space, ensuring we don't split abbreviations like "Mr."
         sentences = re.split(
             r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|\!)\s', text
         )
@@ -212,19 +219,29 @@ class NeurTTSFactory:
         chunks: list[str] = []
         current_chunk: list[str] = []
         current_length = 0
+        
+        # Target roughly 3 sentences per chunk for better flow, unless it exceeds max_length
+        sentences_per_chunk = 3 
 
-        for sentence in sentences:
+        for i, sentence in enumerate(sentences):
             sentence = sentence.strip()
             if not sentence:
                 continue
-            if current_length + len(sentence) <= max_length:
-                current_chunk.append(sentence)
-                current_length += len(sentence) + 1
-            else:
-                if current_chunk:
-                    chunks.append(' '.join(current_chunk))
-                current_chunk = [sentence]
-                current_length = len(sentence) + 1
+                
+            # If adding this sentence exceeds max length, force a split
+            if current_length + len(sentence) > max_length and current_chunk:
+                chunks.append(' '.join(current_chunk))
+                current_chunk = []
+                current_length = 0
+            
+            current_chunk.append(sentence)
+            current_length += len(sentence) + 1
+            
+            # If we reached our target sentence count, start a new chunk
+            if len(current_chunk) >= sentences_per_chunk:
+                 chunks.append(' '.join(current_chunk))
+                 current_chunk = []
+                 current_length = 0
 
         if current_chunk:
             chunks.append(' '.join(current_chunk))
@@ -378,7 +395,18 @@ class NeurTTSFactory:
         
         # CRITICAL FIX: Move tensors to device!
         # The high-level generate methods move tensors to device. We must do it manually here.
+        # _tokenize_texts may return a plain list or a list of tensors rather than a single
+        # batched tensor depending on the library version, so normalise to a 2-D LongTensor.
         device = model_wrapper.model.device
+        if not isinstance(input_ids, torch.Tensor):
+            # Could be a list of int lists or a list of 1-D tensors
+            if isinstance(input_ids, list) and len(input_ids) > 0:
+                if isinstance(input_ids[0], torch.Tensor):
+                    input_ids = torch.stack(input_ids)
+                else:
+                    input_ids = torch.tensor(input_ids, dtype=torch.long)
+            else:
+                input_ids = torch.tensor([input_ids], dtype=torch.long)
         input_ids = input_ids.to(device)
         
         instruct_ids = [None] # Default for custom voice
@@ -421,100 +449,35 @@ class NeurTTSFactory:
             return
 
         start_time = time.time()
-        # text_chunks = self._split_text(text)
-        text_chunks = [text]
-        logger.info("Split into %d chunk(s) for streaming", len(text_chunks))
+        logger.info(
+            "Streaming full text (len=%d): %s",
+            len(text),
+            text[:80] + ("..." if len(text) > 80 else ""),
+        )
 
         cancel_event = threading.Event()
 
         def _stream_generator():
-            """Synchronous generator executed inside a thread-pool executor."""
+            """Synchronous generator executed inside a thread-pool executor.
+
+            Feeds the entire text to the model in one shot and yields each
+            sub-chunk that the model produces as it streams — no manual sentence
+            splitting.  Falls back to a single synthesize+slice pass when the
+            model does not expose ``stream_generate_pcm``.
+            """
             sub_chunk_count = 0
             first_chunk_time = None
             try:
-                for tc_idx, chunk_text in enumerate(text_chunks):
-                    if cancel_event.is_set():
-                        logger.info("Streaming cancelled (client disconnected).")
-                        break
-
-                    # Insert silence between text segments
-                    if tc_idx > 0:
-                        sr = NeurTTSFactory._sample_rate
-                        pause_samples = int(PAUSE_BETWEEN_CHUNKS_SEC * sr)
-                        if pause_samples > 0:
-                            silence_int16 = np.zeros(pause_samples, dtype=np.int16)
-                            pause_bytes = silence_int16.tobytes()
-                            yield struct.pack('<I', len(pause_bytes)) + pause_bytes
-
-                    logger.info(
-                        "Streaming TTS chunk %d/%d (len=%d): %s",
-                        tc_idx + 1,
-                        len(text_chunks),
-                        len(chunk_text),
-                        chunk_text[:80] + ("..." if len(chunk_text) > 80 else ""),
-                    )
-
-                    # Try optimized streaming first
-                    streaming_supported = False
+                if hasattr(NeurTTSFactory._model.model, "stream_generate_pcm"):
+                    # ── Optimized streaming path ──────────────────────────────
                     try:
-                        if hasattr(NeurTTSFactory._model.model, "stream_generate_pcm"):
-                            chunk_generator = self._stream_generate_custom_voice(chunk_text)
-                            streaming_supported = True
-                            
-                            for chunk, sr in chunk_generator:
-                                if cancel_event.is_set(): break
-                                
-                                sub_chunk_count += 1
-                                if sub_chunk_count == 1:
-                                    first_chunk_time = time.time()
-                                    logger.info(
-                                        "Time to first chunk: %.3fs",
-                                        first_chunk_time - start_time,
-                                    )
-                                
-                                # Update sample rate if needed
-                                if NeurTTSFactory._sample_rate != sr:
-                                    NeurTTSFactory._sample_rate = sr
-                                
-                                if chunk.size > 0:
-                                    pcm_int16 = (np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16)
-                                    pcm_bytes = pcm_int16.tobytes()
-                                    # logger.info("Yielding optimized chunk %d size %d", sub_chunk_count, len(pcm_bytes))
-                                    yield struct.pack('<I', len(pcm_bytes)) + pcm_bytes
-                            
-                            if streaming_supported:
-                                # If we finished a chunk via streaming, we're done with this text chunk
-                                # Release GPU memory between text chunks
-                                # torch.cuda.empty_cache()
-                                continue
-
-                    except Exception as e:
-                        if streaming_supported:
-                             # If we started streaming and failed, log error
-                             import traceback
-                             logger.error("Error during optimized streaming: %s\n%s", e, traceback.format_exc())
-                             # If we haven't yielded anything for this chunk yet, we could fallback,
-                             # but mixing streaming and non-streaming in one request might be tricky.
-                             # For now, just log and continue (which might mean silence for this chunk).
-                             pass
-                        else:
-                             # Not supported or failed early
-                             pass
-
-                    if not streaming_supported:
-                        # Fallback to standard generation
-                        audio, sr = self._synthesize_chunk(chunk_text)
-                        if audio is None:
-                            logger.warning("No audio for chunk %d", tc_idx + 1)
-                            continue
-
-                        # Break audio into sub-chunks for smoother streaming
-                        for offset in range(0, len(audio), AUDIO_STREAM_SUB_CHUNK_SAMPLES):
+                        chunk_generator = self._stream_generate_custom_voice(text)
+                        for chunk, sr in chunk_generator:
                             if cancel_event.is_set():
+                                logger.info("Streaming cancelled (client disconnected).")
                                 break
-                            sub = audio[offset : offset + AUDIO_STREAM_SUB_CHUNK_SAMPLES]
-                            sub_chunk_count += 1
 
+                            sub_chunk_count += 1
                             if sub_chunk_count == 1:
                                 first_chunk_time = time.time()
                                 logger.info(
@@ -522,12 +485,45 @@ class NeurTTSFactory:
                                     first_chunk_time - start_time,
                                 )
 
+                            if NeurTTSFactory._sample_rate != sr:
+                                NeurTTSFactory._sample_rate = sr
+
+                            if chunk.size > 0:
+                                pcm_int16 = (np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16)
+                                pcm_bytes = pcm_int16.tobytes()
+                                yield struct.pack('<I', len(pcm_bytes)) + pcm_bytes
+
+                    except Exception as e:
+                        import traceback
+                        logger.error(
+                            "Error during optimized streaming: %s\n%s",
+                            e, traceback.format_exc(),
+                        )
+
+                else:
+                    # ── Fallback: synthesize full audio then slice ─────────────
+                    logger.warning(
+                        "stream_generate_pcm not available — falling back to "
+                        "full synthesis + slice"
+                    )
+                    audio, sr = self._synthesize_chunk(text)
+                    if audio is None:
+                        logger.warning("No audio returned from fallback synthesis.")
+                    else:
+                        for offset in range(0, len(audio), AUDIO_STREAM_SUB_CHUNK_SAMPLES):
+                            if cancel_event.is_set():
+                                break
+                            sub = audio[offset : offset + AUDIO_STREAM_SUB_CHUNK_SAMPLES]
+                            sub_chunk_count += 1
+                            if sub_chunk_count == 1:
+                                first_chunk_time = time.time()
+                                logger.info(
+                                    "Time to first chunk: %.3fs",
+                                    first_chunk_time - start_time,
+                                )
                             pcm_int16 = (np.clip(sub, -1.0, 1.0) * 32767).astype(np.int16)
                             pcm_bytes = pcm_int16.tobytes()
                             yield struct.pack('<I', len(pcm_bytes)) + pcm_bytes
-
-                    # Release GPU memory between text chunks
-                    # torch.cuda.empty_cache()
 
                 total = time.time() - start_time
                 logger.info(
