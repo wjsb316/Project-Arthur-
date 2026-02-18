@@ -73,7 +73,11 @@ class NeurTTSFactory:
     _instance = None
     _model = None
     _lock = asyncio.Lock()
-    _sample_rate: int = 24000  # Sensible default; updated from model output
+    # Output sample rate is fixed at 24000 Hz per Qwen3TTSTokenizerV2Config
+    # (output_sample_rate=24000, decode_upsample_rate=1920 → 24000/1920=12.5 fps codec).
+    # Do not overwrite this from streaming-fork sr return values, which may not
+    # carry the audio sample rate.
+    _sample_rate: int = 24000
     _speaker: str = DEFAULT_SPEAKER
     _language: str = DEFAULT_LANGUAGE
     # Single-worker executor — keeps all CUDA-graph work on one OS thread.
@@ -204,16 +208,22 @@ class NeurTTSFactory:
         text = re.sub(r'\{.*?\}', '', text)
         text = re.sub(r'https?://\S+|www\.\S+', '', text)
         # Normalize em-dash / en-dash to spaced hyphen
-        text = re.sub(r'[\u2013\u2014]', ' - ', text)
+        text = re.sub(r'[\u2013\u2014]', '; ', text)
         # Keep letters, digits, whitespace, and basic punctuation; drop the rest
         text = re.sub(r'[^\w\s,.?!;\'\"\-]', '', text)
         # Ensure periods and semicolons are followed by a space
-        text = re.sub(r'\.(?!\s)', '. ', text)
+        # text = re.sub(r'\.(?!\s)', '. ', text)
         text = re.sub(r';(?!\s)', '; ', text)
+        # Remove leading newline characters
+        text = re.sub(r'^\\n+', '', text)
+        # Strip leading character if it is not a letter or digit
+        text = re.sub(r'^[^\w]', '', text)
+        # Remove comma immediately after the first word
+        text = re.sub(r'^(\S+),', r'\1', text)
         # Collapse whitespace / newlines
-        text = re.sub(r'\s+', ' ', text)
-        text = re.sub(r'\n+', ' ', text)
-        text = re.sub(r'\\n+', ' ', text)
+        # text = re.sub(r'\s+', ' ', text)
+        # text = re.sub(r'\n+', ' ', text)
+        # text = re.sub(r'\\n+', ' ', text)
         return text.strip()
 
     def _split_text(self, text: str, max_length: int = MAX_CHUNK_LENGTH) -> list[str]:
@@ -276,7 +286,6 @@ class NeurTTSFactory:
             speaker=NeurTTSFactory._speaker,
             use_fast_codebook=True,
         )
-        NeurTTSFactory._sample_rate = sr
         if wavs is None or len(wavs) == 0 or wavs[0].size == 0:
             return None, sr
         return wavs[0], sr
@@ -290,7 +299,9 @@ class NeurTTSFactory:
         if not text:
             return b""
 
+        logger.info("TTS text before clean: \"%s\"", text)
         text = self._clean_text(text)
+        logger.info("TTS text after clean: \"%s\"", text)
         if not text:
             logger.warning("Text became empty after cleaning.")
             return b""
@@ -343,7 +354,7 @@ class NeurTTSFactory:
                     return b""
 
                 audio_array = np.concatenate(all_audio)
-                sr = NeurTTSFactory._sample_rate
+                sr = NeurTTSFactory._sample_rate  # always 24000 per tokenizer config
                 inference_time = time.time() - start_time
                 audio_duration = len(audio_array) / sr
                 rtf = inference_time / audio_duration if audio_duration > 0 else 0
@@ -434,7 +445,7 @@ class NeurTTSFactory:
             languages=[language],
             speakers=[speaker],
             emit_every_frames=2, 
-            decode_window_frames=200,
+            # decode_window_frames=200,
             overlap_samples=1,
             use_optimized_decode=True
         )
@@ -451,7 +462,9 @@ class NeurTTSFactory:
         if not text:
             return
 
-        # text = self._clean_text(text)
+        logger.info("TTS streaming text before clean: \"%s\"", text)
+        text = self._clean_text(text)
+        logger.info("TTS streaming text after clean: \"%s\"", text)
         if not text:
             logger.warning("Text became empty after cleaning.")
             return
@@ -501,11 +514,11 @@ class NeurTTSFactory:
                                     first_chunk_time - start_time,
                                 )
 
-                            if NeurTTSFactory._sample_rate != sr:
-                                NeurTTSFactory._sample_rate = sr
-
                             if chunk.size > 0:
-                                pcm_int16 = (np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16)
+                                # Flatten to 1-D: the streaming fork may yield
+                                # shape (1, N) or (N, 1) from its batched decoder.
+                                chunk_1d = np.asarray(chunk).flatten()
+                                pcm_int16 = (np.clip(chunk_1d, -1.0, 1.0) * 32767).astype(np.int16)
                                 pcm_bytes = pcm_int16.tobytes()
                                 yield struct.pack('<I', len(pcm_bytes)) + pcm_bytes
 
