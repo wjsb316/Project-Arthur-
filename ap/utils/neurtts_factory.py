@@ -1,6 +1,7 @@
 import logging
 import queue
 import threading
+import concurrent.futures
 import torch
 import numpy as np
 import asyncio
@@ -61,6 +62,12 @@ class NeurTTSFactory:
 
     Singleton pattern -- one model instance shared across all requests.
     Concurrent GPU access is serialized via an asyncio.Lock.
+
+    All model inference is routed through a single-worker ThreadPoolExecutor
+    (_tts_executor) so that CUDA graphs — which bind their state to
+    Thread-Local Storage — always execute on the same OS thread.  Using the
+    default asyncio executor would dispatch to an arbitrary thread-pool thread
+    and cause ``AssertionError: torch._C._is_key_in_tls`` failures.
     """
 
     _instance = None
@@ -69,6 +76,8 @@ class NeurTTSFactory:
     _sample_rate: int = 24000  # Sensible default; updated from model output
     _speaker: str = DEFAULT_SPEAKER
     _language: str = DEFAULT_LANGUAGE
+    # Single-worker executor — keeps all CUDA-graph work on one OS thread.
+    _tts_executor: "concurrent.futures.ThreadPoolExecutor | None" = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -105,6 +114,13 @@ class NeurTTSFactory:
     def _initialize_model(self, model_name: str):
         from qwen_tts import Qwen3TTSModel
 
+        # Create the dedicated single-worker executor before any model work so
+        # that CUDA graph TLS is always established on that one thread.
+        if NeurTTSFactory._tts_executor is None:
+            NeurTTSFactory._tts_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="tts-worker"
+            )
+
         init_start = time.time()
         logger.info(
             "Initializing Qwen3-TTS model: %s (first run downloads weights)...",
@@ -137,7 +153,7 @@ class NeurTTSFactory:
                     NeurTTSFactory._model.enable_streaming_optimizations(
                         decode_window_frames=160,
                         use_compile=True,
-                        compile_mode="default",
+                        compile_mode="reduce-overhead",
                         use_fast_codebook=True,
                         compile_codebook_predictor=True,
                         compile_talker=True,
@@ -145,17 +161,17 @@ class NeurTTSFactory:
                     )
                     logger.info("Streaming optimizations enabled.")
 
-                    # Warmup run to trigger compilation
+                    # Warmup: run on the dedicated TTS thread so CUDA graph TLS
+                    # is bound to the same thread that all future inference uses.
                     logger.info("Running warmup inference to trigger compilation...")
                     warmup_start = time.time()
                     try:
-                        # Use a short text for warmup
-                        warmup_text = "Warmup."
-                        # We use the internal stream generator to trigger the compiled paths
-                        # Just consume the generator
-                        warmup_gen = self._stream_generate_custom_voice(warmup_text)
-                        for _ in warmup_gen:
-                            pass
+                        def _warmup():
+                            warmup_gen = self._stream_generate_custom_voice("Warmup.")
+                            for _ in warmup_gen:
+                                pass
+
+                        NeurTTSFactory._tts_executor.submit(_warmup).result()
                         logger.info("Warmup complete in %.2fs", time.time() - warmup_start)
                     except Exception as w_err:
                         logger.warning("Warmup failed (non-fatal): %s", w_err)
@@ -359,7 +375,7 @@ class NeurTTSFactory:
 
         loop = asyncio.get_running_loop()
         async with self._lock:
-            return await loop.run_in_executor(None, _generate)
+            return await loop.run_in_executor(NeurTTSFactory._tts_executor, _generate)
 
     # ------------------------------------------------------------------
     # Public API: streaming length-prefixed PCM
@@ -417,9 +433,9 @@ class NeurTTSFactory:
             instruct_ids=instruct_ids,
             languages=[language],
             speakers=[speaker],
-            emit_every_frames=4, 
-            decode_window_frames=80,
-            overlap_samples=0,
+            emit_every_frames=2, 
+            decode_window_frames=200,
+            overlap_samples=1,
             use_optimized_decode=True
         )
         
@@ -435,7 +451,7 @@ class NeurTTSFactory:
         if not text:
             return
 
-        text = self._clean_text(text)
+        # text = self._clean_text(text)
         if not text:
             logger.warning("Text became empty after cleaning.")
             return
@@ -557,7 +573,7 @@ class NeurTTSFactory:
                     # logger.info("Producer: finished")
                     chunk_queue.put(None)  # sentinel
 
-            producer_future = loop.run_in_executor(None, producer)
+            producer_future = loop.run_in_executor(NeurTTSFactory._tts_executor, producer)
             try:
                 while True:
                     chunk = await loop.run_in_executor(None, chunk_queue.get)
