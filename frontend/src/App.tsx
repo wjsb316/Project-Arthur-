@@ -387,13 +387,17 @@ function App() {
 
   const handleDeleteSelected = async () => {
     if (selectedSessions.length === 0 || !confirm(`Delete ${selectedSessions.length} sessions?`)) return;
+    const deletingCurrent = currentSessionId !== null && selectedSessions.includes(currentSessionId);
     try {
       const res = await fetch('/api/chat/sessions', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ session_ids: selectedSessions }),
       });
-      if (res.ok) fetchHistory();
+      if (res.ok) {
+        fetchHistory();
+        if (deletingCurrent) handleNewChat();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -430,6 +434,7 @@ function App() {
       if (res.ok) {
         alert('HISTORY NUKED');
         fetchHistory();
+        handleNewChat();
       }
     } catch (e) {
       console.error(e);
@@ -596,6 +601,7 @@ function App() {
             onStartRecording={startRecording}
             onStopRecording={stopRecording}
             onInterruptPlayback={interruptPlayback}
+            onNewChat={handleNewChat}
           />
         )}
         {view === 'dashboard' && (

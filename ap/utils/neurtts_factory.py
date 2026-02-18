@@ -220,6 +220,8 @@ class NeurTTSFactory:
         text = re.sub(r'^[^\w]', '', text)
         # Remove comma immediately after the first word
         text = re.sub(r'^(\S+),', r'\1', text)
+        # Replace a period within the first 3 words with a semicolon
+        text = re.sub(r'^((?:\S+\s+){0,2}\S+)\.', r'\1;', text)
         # Collapse whitespace / newlines
         # text = re.sub(r'\s+', ' ', text)
         # text = re.sub(r'\n+', ' ', text)

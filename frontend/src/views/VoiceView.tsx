@@ -2,6 +2,7 @@ import { Mic } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import { useOpenMicInterruption } from '../hooks/useOpenMicInterruption';
 import Antigravity from '../Antigravity';
+import { IconNewChat } from '../components/Icons';
 
 interface VoiceViewProps {
   token: string | null;
@@ -14,6 +15,7 @@ interface VoiceViewProps {
   onStartRecording: () => void;
   onStopRecording: () => void;
   onInterruptPlayback: () => void;
+  onNewChat: () => void;
 }
 
 export default function VoiceView({
@@ -27,6 +29,7 @@ export default function VoiceView({
   onStartRecording,
   onStopRecording,
   onInterruptPlayback,
+  onNewChat,
 }: VoiceViewProps) {
   const [isOpenMicEnabled, setIsOpenMicEnabled] = useState(false);
   const [isOpenMicProcessing, setIsOpenMicProcessing] = useState(false);
@@ -62,6 +65,33 @@ export default function VoiceView({
       className="voice-interface"
       style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', position: 'relative' }}
     >
+      <button
+        onClick={onNewChat}
+        title="Start New Chat"
+        style={{
+          position: 'absolute',
+          top: '1rem',
+          right: '1rem',
+          zIndex: 10,
+          background: 'rgba(255,255,255,0.85)',
+          border: '1px solid rgba(255,255,255,0.6)',
+          borderRadius: '8px',
+          padding: '0.5rem 0.75rem',
+          cursor: 'pointer',
+          color: '#333',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          backdropFilter: 'blur(8px)',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          transition: 'background 0.2s ease',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,1)')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.85)')}
+      >
+        <IconNewChat />
+        <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>New Chat</span>
+      </button>
       <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}>
         <Antigravity
           count={1000}
