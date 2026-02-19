@@ -11,9 +11,7 @@ function fmt(s: number | null): string {
 }
 
 export default function PipelineTimingDisplay({ timing, dark = false }: Props) {
-  if (!timing) return null;
-
-  const hasVoice = timing.t3_s !== null || timing.t4_s !== null;
+  const t = timing ?? { t1_s: null, t2_s: null, t3_s: null, t4_s: null };
 
   const bg = dark ? 'rgba(0,0,0,0.45)' : 'rgba(248,250,252,0.92)';
   const border = dark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)';
@@ -21,14 +19,10 @@ export default function PipelineTimingDisplay({ timing, dark = false }: Props) {
   const valueColor = dark ? 'rgba(255,255,255,0.9)' : '#334155';
 
   const rows: { label: string; value: number | null }[] = [
-    { label: 'ctx ', value: timing.t1_s },
-    { label: 'llm ', value: timing.t2_s },
-    ...(hasVoice
-      ? [
-          { label: 'tts₁', value: timing.t3_s },
-          { label: 'tts∞', value: timing.t4_s },
-        ]
-      : []),
+    { label: 'memory',    value: t.t1_s },
+    { label: 'llm',       value: t.t2_s },
+    { label: 'voice₁',   value: t.t3_s },
+    { label: 'voice∞', value: t.t4_s },
   ];
 
   return (
@@ -37,11 +31,12 @@ export default function PipelineTimingDisplay({ timing, dark = false }: Props) {
         background: bg,
         border,
         borderRadius: '6px',
-        padding: '0.35rem 0.6rem',
+        padding: '0.3rem 0.6rem',
         backdropFilter: 'blur(8px)',
         display: 'inline-flex',
-        flexDirection: 'column',
-        gap: '0.1rem',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: '0.75rem',
       }}
     >
       {rows.map(({ label, value }) => (
@@ -49,14 +44,15 @@ export default function PipelineTimingDisplay({ timing, dark = false }: Props) {
           key={label}
           style={{
             display: 'flex',
-            gap: '0.5rem',
+            flexDirection: 'column',
+            alignItems: 'center',
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            fontSize: '0.68rem',
-            lineHeight: '1.4',
+            fontSize: '1rem',
+            lineHeight: '1.3',
             whiteSpace: 'pre',
           }}
         >
-          <span style={{ color: labelColor }}>{label}</span>
+          <span style={{ color: labelColor }}>{label.trim()}</span>
           <span style={{ color: valueColor }}>{fmt(value)}</span>
         </div>
       ))}
