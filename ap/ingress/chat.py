@@ -48,6 +48,23 @@ def build_chat_router(
     session_factory = get_session_maker()
     chat_store = ChatStore(session_factory)
 
+    async def _increment_voice_characters(user_id: str, char_count: int) -> None:
+        """Increment the total characters sent to the voice model for a user."""
+        if char_count <= 0:
+            return
+        async with session_factory() as session:
+            await session.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET voice_characters_used = COALESCE(voice_characters_used, 0) + :delta
+                    WHERE user_id = :user_id
+                    """
+                ),
+                {"delta": char_count, "user_id": user_id},
+            )
+            await session.commit()
+
     agent_graph = build_agent_graph(
         memory_store,
         chat_store,
@@ -210,6 +227,8 @@ def build_chat_router(
 
                 # 4. Synthesize speech response
                 response_text = result["response"]["content"]
+                if response_text:
+                    await _increment_voice_characters(user.user_id, len(response_text))
                 audio_base64 = None
                 if response_text:
                     wav_bytes = await neurtts_factory.generate_audio_wav(response_text)
@@ -284,6 +303,8 @@ def build_chat_router(
                         },
                         headers={"X-Session-ID": str(result["session_id"])},
                     )
+
+                await _increment_voice_characters(user.user_id, len(response_text))
 
                 # TTS enabled: stream audio chunks as they're generated
                 async def audio_generator():

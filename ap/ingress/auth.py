@@ -35,6 +35,7 @@ class UserResponse(BaseModel):
     user_id: str
     username: str
     created_at: str
+    voice_characters_used: int = 0
 
 
 class Token(BaseModel):
@@ -126,7 +127,8 @@ def build_auth_router() -> APIRouter:
             return UserResponse(
                 user_id=new_user.user_id,
                 username=new_user.username,
-                created_at=str(new_user.created_at)
+                created_at=str(new_user.created_at),
+                voice_characters_used=getattr(new_user, "voice_characters_used", 0),
             )
         except HTTPException:
             raise
@@ -136,6 +138,17 @@ def build_auth_router() -> APIRouter:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Registration failed: {str(e)}"
             )
+
+    @router.get("/users/me", response_model=UserResponse)
+    async def read_me(
+        current_user: Annotated[User, Depends(get_current_user)],
+    ):
+        return UserResponse(
+            user_id=current_user.user_id,
+            username=current_user.username,
+            created_at=str(current_user.created_at),
+            voice_characters_used=getattr(current_user, "voice_characters_used", 0),
+        )
 
     @router.delete("/users/me")
     async def delete_me(

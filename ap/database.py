@@ -83,6 +83,16 @@ async def init_db():
         # Create standard tables
         await conn.run_sync(Base.metadata.create_all)
         
+        # Backwards-compatible schema upgrades for existing databases.
+        # Add new columns defensively so init_db can be run multiple times.
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN voice_characters_used INTEGER DEFAULT 0")
+            )
+        except Exception:
+            # Column already exists or table missing; ignore in initializer.
+            pass
+        
         # Create vector tables if they don't exist
         # We use a virtual table 'memory_vectors' linked to 'memory_entries.id'
         if HAS_SQLITE_VEC:

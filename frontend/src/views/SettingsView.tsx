@@ -5,6 +5,7 @@ interface SettingsViewProps {
   setSimilarityThreshold: (v: number) => void;
   configLoading: boolean;
   token: string | null;
+  voiceCharactersUsed: number;
   onDeleteAccount: () => void;
 }
 
@@ -13,6 +14,7 @@ export default function SettingsView({
   setSimilarityThreshold,
   configLoading,
   token,
+  voiceCharactersUsed,
   onDeleteAccount,
 }: SettingsViewProps) {
   const handleThresholdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -52,6 +54,10 @@ export default function SettingsView({
             Minimum similarity for vector searches (memories, chat history). Guardrails are always included. Higher = stricter.
           </p>
         </div>
+        <p>
+          Total characters sent to voice model:{' '}
+          <strong>{voiceCharactersUsed.toLocaleString()}</strong>
+        </p>
         <button onClick={onDeleteAccount} className="danger-btn">
           Delete Account
         </button>

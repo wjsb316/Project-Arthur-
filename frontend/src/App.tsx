@@ -70,6 +70,7 @@ function App() {
   // Settings
   const [configLoading, setConfigLoading] = useState(false);
   const [similarityThreshold, setSimilarityThreshold] = useState(50);
+  const [voiceCharactersUsed, setVoiceCharactersUsed] = useState<number>(0);
 
   const { isRecording, isVoiceProcessing, startRecording, stopRecording, interruptPlayback } = useVoiceRecording(
     token,
@@ -86,7 +87,12 @@ function App() {
         headers: { Authorization: `Bearer ${token}`, ...API_HEADERS },
       })
         .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to fetch user info'))))
-        .then((data) => setUsername(data.username))
+        .then((data) => {
+          setUsername(data.username);
+          if (typeof data.voice_characters_used === 'number') {
+            setVoiceCharactersUsed(data.voice_characters_used);
+          }
+        })
         .catch(console.error);
     }
   }, [token]);
@@ -109,6 +115,15 @@ function App() {
         })
         .catch(console.error)
         .finally(() => setConfigLoading(false));
+
+      fetch('/users/me', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to fetch user info'))))
+        .then((data) => {
+          if (typeof data.voice_characters_used === 'number') {
+            setVoiceCharactersUsed(data.voice_characters_used);
+          }
+        })
+        .catch(console.error);
     }
   }, [view, token]);
 
@@ -708,6 +723,7 @@ function App() {
             setSimilarityThreshold={setSimilarityThreshold}
             configLoading={configLoading}
             token={token}
+            voiceCharactersUsed={voiceCharactersUsed}
             onDeleteAccount={handleDeleteAccount}
           />
         )}
