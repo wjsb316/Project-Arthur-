@@ -3,7 +3,8 @@ import { Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { IconCat, IconNewChat } from '../components/Icons';
 import TypingIndicator from '../components/TypingIndicator';
-import type { ChatMessage } from '../types';
+import PipelineTimingDisplay from '../components/PipelineTimingDisplay';
+import type { ChatMessage, PipelineTiming } from '../types';
 
 interface ChatViewProps {
   chatHistory: ChatMessage[];
@@ -13,6 +14,7 @@ interface ChatViewProps {
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   onNewChat: () => void;
   onSubmit: (e: React.FormEvent) => void;
+  pipelineTiming?: PipelineTiming | null;
 }
 
 export default function ChatView({
@@ -23,6 +25,7 @@ export default function ChatView({
   messagesEndRef,
   onNewChat,
   onSubmit,
+  pipelineTiming,
 }: ChatViewProps) {
   return (
     <div className="chat-interface">
@@ -30,24 +33,27 @@ export default function ChatView({
         <div>
           <h1>Arthur Prime</h1>
         </div>
-        <button
-          onClick={onNewChat}
-          title="Start New Chat"
-          style={{
-            background: 'transparent',
-            border: '1px solid #e2e8f0',
-            borderRadius: '8px',
-            padding: '0.5rem',
-            cursor: 'pointer',
-            color: '#64748b',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-          }}
-        >
-          <IconNewChat />
-          <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>New Chat</span>
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem' }}>
+          <button
+            onClick={onNewChat}
+            title="Start New Chat"
+            style={{
+              background: 'transparent',
+              border: '1px solid #e2e8f0',
+              borderRadius: '8px',
+              padding: '0.5rem',
+              cursor: 'pointer',
+              color: '#64748b',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}
+          >
+            <IconNewChat />
+            <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>New Chat</span>
+          </button>
+          <PipelineTimingDisplay timing={pipelineTiming ?? null} dark={false} />
+        </div>
       </header>
       <div className="chat-area">
         {chatHistory.length === 0 && (

@@ -17,6 +17,7 @@ from .auth import get_current_user
 from ..utils.embedding_factory import embedding_factory
 from ..utils.whisper_factory import whisper_factory
 from ..utils.neurtts_factory import neurtts_factory
+from ..utils.timer import PipelineTimer
 
 from ..models import ModelProvider, ProviderHealth
 from ..memory import MemoryStore
@@ -85,6 +86,9 @@ def build_chat_router(
         if not text_input:
              raise HTTPException(status_code=400, detail="Text required")
 
+        timer = PipelineTimer()
+        timer.stamp("t0")
+
         # 1. Get/Create Session & Save User Message (Closed Loop)
         current_session_id = None
         user_msg_id = None
@@ -137,7 +141,8 @@ def build_chat_router(
         }
         
         final_state = await agent_graph.ainvoke(initial_state)
-        
+        timer.stamp("t1")  # context search pipeline complete
+
         # 3. Consume the stream to trigger generation and persistence
         generator = final_state.get("response_generator")
         if not generator:
@@ -164,6 +169,8 @@ def build_chat_router(
             logger.error(f"Error during generation: {e}")
             raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
 
+        timer.stamp("t2")  # LLM call complete
+
         # 4. Return response
         return {
             "status": "ok",
@@ -174,7 +181,14 @@ def build_chat_router(
                 "content": final_response_content,
                 "confidence": final_response_data.get("confidence"),
                 "model_health": final_response_data.get("model_health")
-            }
+            },
+            "_timer": timer,
+            "timing": {
+                "t1_s": timer.delta("t0", "t1"),
+                "t2_s": timer.delta("t1", "t2"),
+                "t3_s": None,
+                "t4_s": None,
+            },
         }
 
     @router.post("")
@@ -182,13 +196,17 @@ def build_chat_router(
         request: ChatRequest,
         user: User = Depends(get_current_user),
     ):
-        return await _process_chat_core(
+        result = await _process_chat_core(
             text_input=request.text,
             user=user,
             new_session=request.new_session,
             session_id=request.session_id,
             is_voice=False,
         )
+        timer = result.pop("_timer", None)
+        if timer:
+            logger.info(timer.report(is_voice=False))
+        return result
 
     @router.post("/voice")
     async def voice_chat(
@@ -224,6 +242,7 @@ def build_chat_router(
                     session_id=None if new_session else session_id,
                     is_voice=True,
                 )
+                timer = result.pop("_timer", None)
 
                 # 4. Synthesize speech response
                 response_text = result["response"]["content"]
@@ -232,9 +251,16 @@ def build_chat_router(
                 audio_base64 = None
                 if response_text:
                     wav_bytes = await neurtts_factory.generate_audio_wav(response_text)
+                    if timer:
+                        timer.stamp("t3")  # WAV synthesis: first token = stream done
+                        timer.stamp("t4")
+                        result["timing"]["t3_s"] = timer.delta("t2", "t3")
+                        result["timing"]["t4_s"] = timer.delta("t2", "t4")
                     if wav_bytes:
                         audio_base64 = base64.b64encode(wav_bytes).decode('utf-8')
-                    
+
+                if timer:
+                    logger.info(timer.report(is_voice=True))
                 result["audio_base64"] = audio_base64
                 return result
                 
@@ -287,6 +313,7 @@ def build_chat_router(
                     session_id=None if new_session else session_id,
                     is_voice=True,
                 )
+                timer = result.pop("_timer", None)
 
                 # 4. Stream speech response (or return JSON when TTS is skipped for troubleshooting)
                 response_text = result["response"]["content"]
@@ -295,6 +322,8 @@ def build_chat_router(
 
                 if skip_speech_synthesis:
                     # Skip TTS: return JSON only (vectors + clear text already stored by _process_chat_core)
+                    if timer:
+                        logger.info(timer.report(is_voice=False))
                     return JSONResponse(
                         content={
                             **result,
@@ -304,13 +333,23 @@ def build_chat_router(
                         headers={"X-Session-ID": str(result["session_id"])},
                     )
 
+
                 await _increment_voice_characters(user.user_id, len(response_text))
 
                 # TTS enabled: stream audio chunks as they're generated
                 async def audio_generator():
+                    first_chunk = True
                     async for chunk in neurtts_factory.generate_audio_stream(response_text):
+                        if first_chunk:
+                            if timer:
+                                timer.stamp("t3")  # first TTS audio token
+                            first_chunk = False
                         yield chunk
+                    if timer:
+                        timer.stamp("t4")  # TTS stream fully complete
+                        logger.info(timer.report(is_voice=True))
 
+                timing = result.get("timing", {})
                 return StreamingResponse(
                     audio_generator(),
                     media_type="application/octet-stream",
@@ -318,12 +357,14 @@ def build_chat_router(
                         "X-Session-ID": str(result["session_id"]),
                         "X-Message-ID": str(result["message_id"]),
                         "X-Transcribed-Text": transcribed_text,
-                        "X-Model-Generation-Complete": "true",  # Indicates model has finished generating before audio starts
-                        "X-Audio-Format": "pcm16-length-prefixed",  # 4-byte uint32 LE length + PCM data
+                        "X-Model-Generation-Complete": "true",
+                        "X-Audio-Format": "pcm16-length-prefixed",
                         "X-Audio-Sample-Rate": str(neurtts_factory.sample_rate),
                         "X-Audio-Channels": "1",
+                        "X-Timing-T1": str(round(timing.get("t1_s") or 0, 3)),
+                        "X-Timing-T2": str(round(timing.get("t2_s") or 0, 3)),
                         "Cache-Control": "no-cache",
-                        "X-Accel-Buffering": "no",  # Disable nginx buffering if present
+                        "X-Accel-Buffering": "no",
                     }
                 )
                 

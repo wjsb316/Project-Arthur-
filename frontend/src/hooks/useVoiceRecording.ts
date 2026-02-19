@@ -1,11 +1,13 @@
 import { useState, useRef, useCallback } from 'react';
+import type { PipelineTiming } from '../types';
 
 export function useVoiceRecording(
   token: string | null,
   currentSessionId: number | null,
   isNewSession: boolean,
   setCurrentSessionId: (id: number | null) => void,
-  setIsNewSession: (v: boolean) => void
+  setIsNewSession: (v: boolean) => void,
+  onTimingUpdate?: (timing: PipelineTiming) => void
 ) {
   const [isRecording, setIsRecording] = useState(false);
   const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
@@ -78,6 +80,7 @@ export function useVoiceRecording(
       } else if (currentSessionId != null) {
         url.searchParams.set('session_id', String(currentSessionId));
       }
+      const requestStart = performance.now();
       try {
         const res = await fetch(url.toString(), {
           method: 'POST',
@@ -91,6 +94,10 @@ export function useVoiceRecording(
           const transcribedText = res.headers.get('X-Transcribed-Text');
           const sampleRateHeader = res.headers.get('X-Audio-Sample-Rate');
           const sampleRate = sampleRateHeader ? parseInt(sampleRateHeader, 10) : 24000;
+          const t1Header = res.headers.get('X-Timing-T1');
+          const t2Header = res.headers.get('X-Timing-T2');
+          const t1_s = t1Header ? parseFloat(t1Header) : null;
+          const t2_s = t2Header ? parseFloat(t2Header) : null;
           if (sessionId) {
             setCurrentSessionId(parseInt(sessionId));
             setIsNewSession(false);
@@ -99,6 +106,7 @@ export function useVoiceRecording(
           if (contentType.includes('application/json')) {
             const data = await res.json();
             console.log('Voice response (TTS skipped):', data);
+            if (data.timing && onTimingUpdate) onTimingUpdate(data.timing);
             setIsVoiceProcessing(false);
             return;
           }
@@ -110,6 +118,7 @@ export function useVoiceRecording(
               let nextStartTime = 0;
               let chunkCount = 0;
               let playbackStarted = false;
+              let firstAudioMs: number | null = null;
               const bufferedAudioBuffers: AudioBuffer[] = [];
               let pendingBytes = new Uint8Array(0);
 
@@ -160,6 +169,16 @@ export function useVoiceRecording(
                 const audioBuffer = createAudioBuffer(pcmData);
                     if (audioBuffer) scheduleAudioBuffer(audioBuffer);
                   }
+                  if (onTimingUpdate && (t1_s !== null || t2_s !== null)) {
+                    const streamDoneMs = performance.now();
+                    const elapsed = (streamDoneMs - requestStart) / 1000;
+                    const serverFixed = (t1_s ?? 0) + (t2_s ?? 0);
+                    const t3_s = firstAudioMs !== null
+                      ? (firstAudioMs - requestStart) / 1000 - serverFixed
+                      : null;
+                    const t4_s = elapsed - serverFixed;
+                    onTimingUpdate({ t1_s, t2_s, t3_s, t4_s });
+                  }
                   if (audioSourcesRef.current.length > 0) {
                     const lastScheduledEndTime = nextStartTime;
                     const now = audioContext.currentTime;
@@ -173,6 +192,7 @@ export function useVoiceRecording(
                   break;
                 }
                 if (value?.length) {
+                  if (firstAudioMs === null) firstAudioMs = performance.now();
                   const newBuffer = new Uint8Array(pendingBytes.length + value.length);
                   newBuffer.set(pendingBytes);
                   newBuffer.set(value, pendingBytes.length);

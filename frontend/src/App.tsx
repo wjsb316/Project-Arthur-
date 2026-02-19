@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_HEADERS } from './api';
-import type { AppView, ChatMessage, HistorySession, Memory, Agent, Guardrail } from './types';
+import type { AppView, ChatMessage, HistorySession, Memory, Agent, Guardrail, PipelineTiming } from './types';
 import Sidebar, { MobileHeader } from './components/Sidebar';
 import {
   AuthView,
@@ -57,6 +57,8 @@ function App() {
   // Chat
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [pipelineTiming, setPipelineTiming] = useState<PipelineTiming | null>(null);
+  const handleTimingUpdate = useCallback((t: PipelineTiming) => setPipelineTiming(t), []);
   const [fullHistory, setFullHistory] = useState<HistorySession[]>([]);
   const [selectedSessions, setSelectedSessions] = useState<number[]>([]);
   const [historySearch, setHistorySearch] = useState('');
@@ -77,7 +79,8 @@ function App() {
     currentSessionId,
     isNewSession,
     setCurrentSessionId,
-    setIsNewSession
+    setIsNewSession,
+    handleTimingUpdate
   );
 
   useEffect(() => {
@@ -495,6 +498,7 @@ function App() {
         const data = await res.json();
         if (data.session_id && !currentSessionId) setCurrentSessionId(data.session_id);
         if (data.response) setChatHistory((prev) => [...prev, { role: 'Arthur', content: data.response.content }]);
+        if (data.timing) setPipelineTiming(data.timing);
       } else {
         setChatHistory((prev) => [...prev, { role: 'Arthur', content: 'I am having trouble communicating with the model provider.' }]);
       }
@@ -617,6 +621,8 @@ function App() {
             onStopRecording={stopRecording}
             onInterruptPlayback={interruptPlayback}
             onNewChat={handleNewChat}
+            pipelineTiming={pipelineTiming}
+            onTimingUpdate={handleTimingUpdate}
           />
         )}
         {view === 'dashboard' && (
@@ -628,6 +634,7 @@ function App() {
             messagesEndRef={messagesEndRef}
             onNewChat={handleNewChat}
             onSubmit={handleChatSubmit}
+            pipelineTiming={pipelineTiming}
           />
         )}
         {view === 'history' && (

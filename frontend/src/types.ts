@@ -24,6 +24,13 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface PipelineTiming {
+  t1_s: number | null;
+  t2_s: number | null;
+  t3_s: number | null;
+  t4_s: number | null;
+}
+
 export interface HistoryMessage {
   role: string;
   content: string;
