@@ -276,7 +276,10 @@ async def retrieve_agents(state: AgentState) -> dict:
     try:
         session_factory = get_session_maker()
         async with session_factory() as session:
-            stmt = select(Agent).where(Agent.user_id == state["user_id"])
+            stmt = select(Agent).where(
+                Agent.user_id == state["user_id"],
+                Agent.enabled == True
+            )
             result = await session.execute(stmt)
             agents = result.scalars().all()
             # Convert to dicts for state
