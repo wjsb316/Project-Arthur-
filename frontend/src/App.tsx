@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { API_HEADERS } from './api';
+import { API_HEADERS, apiFetch, UNAUTHORIZED_EVENT } from './api';
 import type { AppView, ChatMessage, HistorySession, Memory, Agent, Guardrail, PipelineTiming } from './types';
 import Sidebar, { MobileHeader } from './components/Sidebar';
 import {
@@ -87,7 +87,7 @@ function App() {
   useEffect(() => {
     if (token) {
       setView('dashboard');
-      fetch('/users/me', {
+      apiFetch('/users/me', {
         headers: { Authorization: `Bearer ${token}`, ...API_HEADERS },
       })
         .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to fetch user info'))))
@@ -132,7 +132,7 @@ function App() {
     if (view === 'memories' && token) fetchMemories();
     if (view === 'settings' && token) {
       setConfigLoading(true);
-      fetch('/api/config/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
+      apiFetch('/api/config/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
         .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load config'))))
         .then((data: { similarity_threshold: number }) => {
           setSimilarityThreshold(data.similarity_threshold ?? 50);
@@ -140,7 +140,7 @@ function App() {
         .catch(console.error)
         .finally(() => setConfigLoading(false));
 
-      fetch('/users/me', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
+      apiFetch('/users/me', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
         .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to fetch user info'))))
         .then((data) => {
           if (typeof data.voice_characters_used === 'number') {
@@ -154,7 +154,7 @@ function App() {
   // When opening chat (dashboard), sync with server only if we have a current session
   useEffect(() => {
     if (view !== 'dashboard' || !token || currentSessionId == null) return;
-    fetch('/api/chat/history', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
+    apiFetch('/api/chat/history', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
       .then((res) => res.ok ? res.json() : Promise.reject(new Error('Failed to load history')))
       .then((data: HistorySession[]) => {
         const session = data?.find((s) => s.id === currentSessionId);
@@ -166,7 +166,7 @@ function App() {
   }, [view, token, currentSessionId]);
 
   const fetchMemories = () => {
-    fetch('/api/memories/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
+    apiFetch('/api/memories/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
       .then((res) => res.json())
       .then((data) => {
         setMemories(data);
@@ -185,7 +185,7 @@ function App() {
     e.preventDefault();
     if (!newMemoryContent.trim()) return;
     try {
-      const res = await fetch('/api/memories/', {
+      const res = await apiFetch('/api/memories/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ content: newMemoryContent, kind: newMemoryKind }),
@@ -208,7 +208,7 @@ function App() {
   const handleDeleteSelectedMemories = async () => {
     if (selectedMemories.length === 0 || !confirm(`Forget ${selectedMemories.length} memories?`)) return;
     try {
-      const res = await fetch('/api/memories/selected/bulk', {
+      const res = await apiFetch('/api/memories/selected/bulk', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ memory_ids: selectedMemories }),
@@ -246,7 +246,7 @@ function App() {
 
   const handleNukeMemories = async () => {
     try {
-      const res = await fetch('/api/memories/all/nuke', {
+      const res = await apiFetch('/api/memories/all/nuke', {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}`, ...API_HEADERS },
       });
@@ -264,7 +264,7 @@ function App() {
     e.preventDefault();
     if (!editMemoryContent.trim() || !editingMemory) return;
     try {
-      const res = await fetch(`/api/memories/${editingMemory.id}`, {
+      const res = await apiFetch(`/api/memories/${editingMemory.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ content: editMemoryContent, kind: editMemoryKind }),
@@ -281,7 +281,7 @@ function App() {
   };
 
   const fetchAgents = () => {
-    fetch('/api/agents/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
+    apiFetch('/api/agents/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
       .then((res) => res.json())
       .then((data) => setAgents(data))
       .catch(console.error);
@@ -291,7 +291,7 @@ function App() {
     e.preventDefault();
     if (!newAgentName.trim() || !newAgentPrompt.trim()) return;
     try {
-      const res = await fetch('/api/agents/', {
+      const res = await apiFetch('/api/agents/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ name: newAgentName, prompt: newAgentPrompt }),
@@ -310,7 +310,7 @@ function App() {
   const handleDeleteAgent = async (id: number) => {
     if (!confirm('Delete this agent?')) return;
     try {
-      const res = await fetch(`/api/agents/${id}`, {
+      const res = await apiFetch(`/api/agents/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}`, ...API_HEADERS },
       });
@@ -324,7 +324,7 @@ function App() {
     e.preventDefault();
     if (!editAgentName.trim() || !editAgentPrompt.trim() || !editingAgent) return;
     try {
-      const res = await fetch(`/api/agents/${editingAgent.id}`, {
+      const res = await apiFetch(`/api/agents/${editingAgent.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ name: editAgentName, prompt: editAgentPrompt }),
@@ -342,7 +342,7 @@ function App() {
 
   const handleToggleAgent = async (id: number, enabled: boolean) => {
     try {
-      const res = await fetch(`/api/agents/${id}`, {
+      const res = await apiFetch(`/api/agents/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ enabled }),
@@ -354,7 +354,7 @@ function App() {
   };
 
   const fetchGuardrails = () => {
-    fetch('/api/guardrails/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
+    apiFetch('/api/guardrails/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
       .then((res) => res.json())
       .then((data) => setGuardrails(data))
       .catch(console.error);
@@ -364,7 +364,7 @@ function App() {
     e.preventDefault();
     if (!newGuardrailName.trim() || !newGuardrailPrompt.trim()) return;
     try {
-      const res = await fetch('/api/guardrails/', {
+      const res = await apiFetch('/api/guardrails/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ name: newGuardrailName, prompt: newGuardrailPrompt }),
@@ -383,7 +383,7 @@ function App() {
   const handleDeleteGuardrail = async (id: number) => {
     if (!confirm('Delete this guardrail?')) return;
     try {
-      const res = await fetch(`/api/guardrails/${id}`, {
+      const res = await apiFetch(`/api/guardrails/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}`, ...API_HEADERS },
       });
@@ -397,7 +397,7 @@ function App() {
     e.preventDefault();
     if (!editGuardrailName.trim() || !editGuardrailPrompt.trim() || !editingGuardrail) return;
     try {
-      const res = await fetch(`/api/guardrails/${editingGuardrail.id}`, {
+      const res = await apiFetch(`/api/guardrails/${editingGuardrail.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ name: editGuardrailName, prompt: editGuardrailPrompt }),
@@ -414,7 +414,7 @@ function App() {
   };
 
   const fetchHistory = () => {
-    fetch('/api/chat/history', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
+    apiFetch('/api/chat/history', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
       .then((res) => res.json())
       .then((data) => {
         setFullHistory(data);
@@ -441,7 +441,7 @@ function App() {
     if (selectedSessions.length === 0 || !confirm(`Delete ${selectedSessions.length} sessions?`)) return;
     const deletingCurrent = currentSessionId !== null && selectedSessions.includes(currentSessionId);
     try {
-      const res = await fetch('/api/chat/sessions', {
+      const res = await apiFetch('/api/chat/sessions', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify({ session_ids: selectedSessions }),
@@ -479,7 +479,7 @@ function App() {
 
   const handleNukeHistory = async () => {
     try {
-      const res = await fetch('/api/chat/history', {
+      const res = await apiFetch('/api/chat/history', {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}`, ...API_HEADERS },
       });
@@ -523,7 +523,7 @@ function App() {
       };
       if (currentSessionId && !isNewSession) payload.session_id = currentSessionId;
       if (isNewSession) setIsNewSession(false);
-      const res = await fetch('/api/chat', {
+      const res = await apiFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
         body: JSON.stringify(payload),
@@ -586,18 +586,23 @@ function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
     setToken(null);
     setView('login');
     setUsername('');
     setPassword('');
-  };
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener(UNAUTHORIZED_EVENT, handleLogout);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleLogout);
+  }, [handleLogout]);
 
   const handleDeleteAccount = async () => {
     if (!confirm('Are you sure? This cannot be undone.')) return;
     try {
-      const res = await fetch('/users/me', {
+      const res = await apiFetch('/users/me', {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}`, ...API_HEADERS },
       });

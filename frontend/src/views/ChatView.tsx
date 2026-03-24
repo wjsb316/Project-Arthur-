@@ -104,7 +104,9 @@ export default function ChatView({
             placeholder="Type your message..."
             rows={1}
           />
-          <Send color="#000000" strokeWidth={1} className="send-btn" />
+          <button type="submit" className="send-btn" disabled={isLoading || !chatInput.trim()}>
+            <Send color="#000000" strokeWidth={1} />
+          </button>
         </form>
       </div>
     </div>
