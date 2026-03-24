@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     tts_speaker: str = "Ryan"       # See Qwen3-TTS docs for available speakers
     tts_language: str = "English"   # Default synthesis language
 
+    # TTS provider selection and OpenAI TTS settings
+    tts_provider: str = "qwen"                  # "qwen" or "openai"
+    openai_tts_api_key: str | None = None
+    openai_tts_model: str = "gpt-4o-mini-tts"
+    openai_tts_voice: str = "coral"
+    openai_tts_instructions: str | None = None  # Only supported by gpt-4o-mini-tts
+
     class Config:
         env_prefix = "ARTHUR_"
         env_file = ".env"

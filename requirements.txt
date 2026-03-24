@@ -27,6 +27,9 @@ git+https://github.com/dffdeeq/Qwen3-TTS-streaming.git
 soundfile==0.13.1
 numpy==2.2.6
 
+# OpenAI SDK — used by OpenAITTSFactory and langchain-openai
+openai
+
 # Langchain-nomic for vector storage
 # langchain-nomic==1.0.1
 # gpt4all==2.8.2
