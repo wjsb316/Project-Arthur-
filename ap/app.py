@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -33,15 +34,28 @@ app: FastAPI | None = None
 
 from .utils.neurtts_factory import neurtts_factory
 
+_app_ready = False
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize DB
+    global _app_ready
     await init_db()
-    # TTS model is initialized in create_app() so it loads before the server
-    # accepts connections; this call is a no-op if already loaded.
-    neurtts_factory.initialize()
+
+    settings = app.state.settings
+
+    async def _load_models():
+        global _app_ready
+        await asyncio.to_thread(
+            neurtts_factory.initialize,
+            model_name=settings.tts_model,
+            speaker=settings.tts_speaker,
+            language=settings.tts_language,
+        )
+        _app_ready = True
+
+    asyncio.create_task(_load_models())
     yield
-    # Shutdown: Clean up (if needed)
 
 
 def create_app(
@@ -73,15 +87,6 @@ def create_app(
     set_config_path(settings.memory_db_path.parent / "config_overrides.json")
     load_persisted()
 
-    # Initialize Qwen3-TTS model synchronously when app is created (before lifespan).
-    # With uvicorn --factory, create_app runs before the server accepts connections,
-    # so the model is loaded once and ready before any requests arrive.
-    neurtts_factory.initialize(
-        model_name=settings.tts_model,
-        speaker=settings.tts_speaker,
-        language=settings.tts_language,
-    )
-
     # Use the ORM-based MemoryStore (similarity threshold from runtime config)
     memory = memory_store or MemoryStore(session_maker)
     
@@ -102,6 +107,8 @@ def create_app(
         lifespan=lifespan,
     )
 
+    application.state.settings = settings
+
     # Restrict access to frontend only
     # TODO: Re-enable after testing cross-network access
     # application.add_middleware(FrontendAccessMiddleware)
@@ -118,6 +125,12 @@ def create_app(
     async def health() -> dict[str, str]:
         """Health check endpoint to verify service status."""
         return {"status": "ok"}
+
+    @application.get("/api/ready")
+    async def readiness():
+        from .utils.neurtts_factory import NeurTTSFactory
+        ready = _app_ready and NeurTTSFactory._model is not None
+        return {"ready": ready}
 
     application.include_router(build_gateway_router())
     application.include_router(build_streaming_router(provider, memory, personal, audit))
