@@ -17,6 +17,7 @@ import './App.css';
 
 function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+  const [backendReady, setBackendReady] = useState(false);
   const [view, setView] = useState<AppView>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -98,6 +99,26 @@ function App() {
         })
         .catch(console.error);
     }
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/ready');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ready) {
+            setBackendReady(true);
+            return;
+          }
+        }
+      } catch { /* server not up yet */ }
+      if (!cancelled) setTimeout(poll, 1500);
+    };
+    poll();
+    return () => { cancelled = true; };
   }, [token]);
 
   useEffect(() => {
@@ -611,6 +632,14 @@ function App() {
 
   return (
     <div className="app-layout">
+      {!backendReady && (
+        <div className="backend-loading-overlay">
+          <div className="backend-loading-content">
+            <div className="backend-loading-spinner" />
+            <p>Loading...</p>
+          </div>
+        </div>
+      )}
       <MobileHeader onMenuClick={() => setIsSidebarOpen(true)} />
       <Sidebar
         view={view}
