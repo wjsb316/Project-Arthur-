@@ -1,4 +1,3 @@
-import pytest
 
 from ap.friend_brain import FriendBrain
 from ap.ops_brain import OpsBrainGate

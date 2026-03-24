@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
-from typing import Any, Union
+from typing import Union
 import hashlib
-import base64
 
 from jose import jwt
 from passlib.context import CryptContext

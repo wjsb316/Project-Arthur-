@@ -5,7 +5,6 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy import text
 import sqlalchemy.event
 import sqlite_vec
-import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +33,7 @@ async def run_test():
 
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE chat_sessions (id INTEGER PRIMARY KEY, user_id TEXT)"))
-        await conn.execute(text("CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, session_id INTEGER, content TEXT)"))
+        await conn.execute(text("CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, session_id INTEGER, content TEXT)"))  # noqa: E501
         # Create vector table
         await conn.execute(text("""
             CREATE VIRTUAL TABLE chat_message_vectors USING vec0(

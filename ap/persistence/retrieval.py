@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, List, Optional, Tuple, Type
+from typing import List, Optional
 
-from sqlalchemy import text, select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
 
 from ..utils.embedding_factory import embedding_factory
 
@@ -52,7 +50,7 @@ class VectorRetriever:
 
             # Construct SQL query
             # Note: We use raw SQL for the vector distance function as it's specific to sqlite-vec
-            filter_clauses = [f"m.user_id = :user_id"]
+            filter_clauses = ["m.user_id = :user_id"]
             if additional_filters:
                 for col, val in additional_filters.items():
                     filter_clauses.append(f"m.{col} = :{col}")

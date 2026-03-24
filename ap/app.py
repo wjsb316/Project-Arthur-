@@ -26,13 +26,12 @@ from .persistence.audit import AuditLog
 from .models import ModelProvider, OpenAIModelProvider
 from .personal_brain import PersonalBrain
 from .professional_brain import ProfessionalBrainGate
-from .middleware import FrontendAccessMiddleware
 
 
 app: FastAPI | None = None
 
 
-from .utils.neurtts_factory import neurtts_factory
+from .utils.neurtts_factory import neurtts_factory  # noqa: E402
 
 _app_ready = False
 
@@ -176,7 +175,7 @@ def create_app(
         @application.get("/{full_path:path}")
         async def serve_spa(full_path: str):
             # Allow API routes and docs to pass through (though they should match earlier)
-            if full_path.startswith("api") or full_path.startswith("ws") or full_path in ("docs", "redoc", "openapi.json"):
+            if full_path.startswith("api") or full_path.startswith("ws") or full_path in ("docs", "redoc", "openapi.json"):  # noqa: E501
                  return {"status": "404", "message": "Not found"}
 
             file_path = static_dir / full_path

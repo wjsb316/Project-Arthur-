@@ -11,7 +11,7 @@ logger = logging.getLogger("arthur.ap.runtime_config")
 
 # Defaults for parameters exposed via the config API
 _DEFAULTS: dict[str, Any] = {
-    "similarity_threshold": 0.5,  # 0–1; min cosine similarity for vector searches (memory, chat); guardrails are always included
+    "similarity_threshold": 0.5,  # 0–1; min cosine similarity for vector searches (memory, chat); guardrails are always included  # noqa: E501
 }
 
 _runtime: dict[str, Any] = {}

@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, List
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, text
 
 from ..models.memory import Memory
@@ -36,7 +35,7 @@ class MemoryStore:
     def __init__(self, session_factory) -> None:
         self._session_factory = session_factory
 
-    async def _store(self, kind: str, content: str, user_id: str, *, importance: float = 1.0, decay_rate: float = 0.01) -> int:
+    async def _store(self, kind: str, content: str, user_id: str, *, importance: float = 1.0, decay_rate: float = 0.01) -> int:  # noqa: E501
         content = content[:2048]
         now = datetime.now(timezone.utc)
         
@@ -73,10 +72,10 @@ class MemoryStore:
     async def store_fact(self, content: str, user_id: str, *, importance: float = 1.0, decay_rate: float = 0.01) -> int:
         return await self._store("fact", content, user_id, importance=importance, decay_rate=decay_rate)
 
-    async def store_episode(self, content: str, user_id: str, *, importance: float = 1.0, decay_rate: float = 0.01) -> int:
+    async def store_episode(self, content: str, user_id: str, *, importance: float = 1.0, decay_rate: float = 0.01) -> int:  # noqa: E501
         return await self._store("episode", content, user_id, importance=importance, decay_rate=decay_rate)
 
-    async def store_open_loop(self, content: str, user_id: str, *, importance: float = 0.5, decay_rate: float = 0.02) -> int:
+    async def store_open_loop(self, content: str, user_id: str, *, importance: float = 0.5, decay_rate: float = 0.02) -> int:  # noqa: E501
         return await self._store("open_loop", content, user_id, importance=importance, decay_rate=decay_rate)
 
     async def forget(self, entry_id: int, user_id: str) -> bool:

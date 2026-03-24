@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Dict, Protocol
+from typing import Any, AsyncGenerator, Protocol
 
 import httpx
 
@@ -173,7 +173,7 @@ class OpenAIModelProvider:
                         except json.JSONDecodeError:
                              logger.warning(
                                 "provider_stream_parse_warning",
-                                extra={"event": "provider_parse_warning", "provider": "openai", "stream_id": stream_id, "part": part[:200]},
+                                extra={"event": "provider_parse_warning", "provider": "openai", "stream_id": stream_id, "part": part[:200]},  # noqa: E501
                             )
                         except Exception as exc:  # noqa: BLE001
                             logger.error(

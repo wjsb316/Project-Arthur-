@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    "__pycache__",
+    ".venv",
+    "venv",
+    "neutts-air",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

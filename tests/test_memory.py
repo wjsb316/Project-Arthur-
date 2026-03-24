@@ -19,7 +19,7 @@ def test_retrieval_ranks_by_recency(tmp_path):
     db_path = tmp_path / "memory.db"
     store = MemoryStore(db_path)
     older = store.store_fact("old detail", importance=0.5, decay_rate=0.1)
-    newer = store.store_fact("fresh detail", importance=1.0, decay_rate=0.01)
+    _newer = store.store_fact("fresh detail", importance=1.0, decay_rate=0.01)
 
     # Manually backdate the older entry
     with store._connect() as conn:  # noqa: SLF001 - test-controlled adjustment

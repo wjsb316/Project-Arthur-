@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile, Query
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,7 +6,7 @@ from sqlalchemy import text, delete, select
 import json
 import logging
 import base64
-from typing import Dict, Any, Optional
+from typing import Optional
 import tempfile
 import os
 
@@ -14,12 +14,11 @@ from ..database import get_db, get_session_maker
 from ..models.chat import ChatSession, ChatMessage
 from ..models.users import User
 from .auth import get_current_user
-from ..utils.embedding_factory import embedding_factory
 from ..utils.whisper_factory import whisper_factory
 from ..utils.neurtts_factory import neurtts_factory
 from ..utils.timer import PipelineTimer
 
-from ..models import ModelProvider, ProviderHealth
+from ..models import ModelProvider
 from ..memory import MemoryStore
 from ..personal_brain import PersonalBrain
 from ..persistence.audit import AuditLog
@@ -229,7 +228,7 @@ def build_chat_router(
                 
                 # Collect all segments
                 transcribed_text = " ".join([segment.text for segment in segments]).strip()
-                logger.info(f"Transcribed audio: {transcribed_text} (language: {info.language}, prob: {info.language_probability})")
+                logger.info(f"Transcribed audio: {transcribed_text} (language: {info.language}, prob: {info.language_probability})")  # noqa: E501
                 
                 if not transcribed_text:
                     raise HTTPException(status_code=400, detail="Could not transcribe audio")
@@ -300,7 +299,7 @@ def build_chat_router(
                 
                 # Collect all segments
                 transcribed_text = " ".join([segment.text for segment in segments]).strip()
-                logger.info(f"Transcribed audio: {transcribed_text} (language: {info.language}, prob: {info.language_probability})")
+                logger.info(f"Transcribed audio: {transcribed_text} (language: {info.language}, prob: {info.language_probability})")  # noqa: E501
                 
                 if not transcribed_text:
                     raise HTTPException(status_code=400, detail="Could not transcribe audio")

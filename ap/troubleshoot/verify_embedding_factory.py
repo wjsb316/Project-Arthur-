@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 from ap.utils.embedding_factory import embedding_factory
 
 def test_factory():
-    print(f"Testing EmbeddingFactory...")
+    print("Testing EmbeddingFactory...")
     print(f"Device: {embedding_factory.device}")
     
     text = "Hello, world!"

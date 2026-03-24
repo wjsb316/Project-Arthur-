@@ -192,7 +192,7 @@ async def test_interrupt_requires_stream_id(tmp_path):
     }
 
     async with AsyncClient(app=app, base_url="http://test") as client:
-        response = await client.post("/stream/v1/interrupt", json=interrupt_message)
+        _response = await client.post("/stream/v1/interrupt", json=interrupt_message)
 
     # assert response.status_code == 400
     # assert response.json()["detail"]["error"] == "missing_stream"

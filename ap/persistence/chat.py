@@ -6,7 +6,6 @@ import logging
 import json
 from typing import List, Optional
 from sqlalchemy import select, text
-from datetime import datetime, timezone
 
 from .retrieval import VectorRetriever
 from ..models.chat import ChatMessage, ChatSession
@@ -96,7 +95,7 @@ class ChatStore:
     async def get_or_create_recent_session(self, user_id: str, title_hint: str) -> int:
         """Get the most recent session or create a new one if none exists or too old."""
         async with self._session_factory() as session:
-            stmt = select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.updated_at.desc()).limit(1)
+            stmt = select(ChatSession).where(ChatSession.user_id == user_id).order_by(ChatSession.updated_at.desc()).limit(1)  # noqa: E501
             result = await session.execute(stmt)
             existing = result.scalar_one_or_none()
             

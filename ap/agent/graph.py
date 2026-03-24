@@ -8,21 +8,17 @@ import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TypedDict, List, Annotated, Any, AsyncGenerator, Dict, Optional, NotRequired
-import operator
+from typing import TypedDict, List, Any, AsyncGenerator, Optional, NotRequired
 
 from langgraph.graph import StateGraph, END
-from langchain_core.messages import SystemMessage, HumanMessage
 from sqlalchemy import select
 
 from ..memory.store import MemoryEntry, MemoryStore
 from ..persistence.chat import ChatStore
-from ..persistence.retrieval import VectorRetriever
-from ..models.chat import ChatMessage
 from ..models.agents import Agent
 from ..models.guardrails import Guardrail
 from ..database import get_session_maker
-from ..models import ModelProvider, ProviderHealth
+from ..models import ModelProvider
 from ..personal_brain import PersonalBrain
 from ..persistence.audit import AuditLog
 from ..protocol.validator import validate_message
@@ -207,7 +203,7 @@ DEFAULT_VOICE_SYSTEM_PROMPT = (
     "You will optimize all responses to be formatted for text to speech." 
     "This means no Emojis, and no characters that would need to be read to understood." 
     "Keep all characters to those that provide tangible meaning when spoken." 
-    "All numbers should be converted to word representation (i.e. 9,100 = nine thousand one hundred) before being returned."
+    "All numbers should be converted to word representation (i.e. 9,100 = nine thousand one hundred) before being returned."  # noqa: E501
 )
 
 
@@ -278,7 +274,7 @@ async def retrieve_agents(state: AgentState) -> dict:
         async with session_factory() as session:
             stmt = select(Agent).where(
                 Agent.user_id == state["user_id"],
-                Agent.enabled == True
+                Agent.enabled == True  # noqa: E712
             )
             result = await session.execute(stmt)
             agents = result.scalars().all()
@@ -293,7 +289,7 @@ async def retrieve_agents(state: AgentState) -> dict:
 
 
 async def retrieve_guardrails(state: AgentState) -> dict:
-    """Node: Retrieve all guardrails for the user. All guardrails go to the LLM with every query; no similarity filtering."""
+    """Node: Retrieve all guardrails for the user. All guardrails go to the LLM with every query; no similarity filtering."""  # noqa: E501
     try:
         session_factory = get_session_maker()
         async with session_factory() as session:
@@ -341,7 +337,7 @@ def bundle_context(state: AgentState, voice_system_prompt: str | None = None) ->
             f"{m.get('role', 'unknown')}: {m.get('content', '')}"
             for m in state["current_session_history"]
         ]
-        parts.append(f"Current conversation:\n" + "\n".join(session_lines))
+        parts.append("Current conversation:\n" + "\n".join(session_lines))
     else:
         # No session (e.g. streaming without session) – add user input
         parts.append(f"User: {state['user_input']}")
