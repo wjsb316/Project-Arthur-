@@ -92,6 +92,13 @@ async def init_db():
         except Exception:
             # Column already exists or table missing; ignore in initializer.
             pass
+
+        try:
+            await conn.execute(
+                text("ALTER TABLE agents ADD COLUMN enabled BOOLEAN DEFAULT 1")
+            )
+        except Exception:
+            pass
         
         # Create vector tables if they don't exist
         # We use a virtual table 'memory_vectors' linked to 'memory_entries.id'
