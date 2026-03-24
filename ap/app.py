@@ -1,4 +1,3 @@
-import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -31,8 +30,6 @@ from .professional_brain import ProfessionalBrainGate
 app: FastAPI | None = None
 
 
-from .utils.neurtts_factory import neurtts_factory  # noqa: E402
-
 _app_ready = False
 
 
@@ -40,24 +37,7 @@ _app_ready = False
 async def lifespan(app: FastAPI):
     global _app_ready
     await init_db()
-
-    settings = app.state.settings
-
-    if settings.tts_provider == "qwen":
-        async def _load_models():
-            global _app_ready
-            await asyncio.to_thread(
-                neurtts_factory.initialize,
-                model_name=settings.tts_model,
-                speaker=settings.tts_speaker,
-                language=settings.tts_language,
-            )
-            _app_ready = True
-
-        asyncio.create_task(_load_models())
-    else:
-        _app_ready = True
-
+    _app_ready = True
     yield
 
 
@@ -98,17 +78,14 @@ def create_app(
 
     from .utils.openai_tts_factory import OpenAITTSFactory
 
-    if settings.tts_provider == "openai":
-        if not settings.openai_tts_api_key:
-            raise ValueError("ARTHUR_OPENAI_TTS_API_KEY required when tts_provider=openai")
-        tts_provider = OpenAITTSFactory(
-            api_key=settings.openai_tts_api_key,
-            model=settings.openai_tts_model,
-            voice=settings.openai_tts_voice,
-            instructions=settings.openai_tts_instructions,
-        )
-    else:
-        tts_provider = neurtts_factory  # Qwen — initialized in lifespan
+    if not settings.openai_tts_api_key:
+        raise ValueError("ARTHUR_OPENAI_TTS_API_KEY is required")
+    tts_provider = OpenAITTSFactory(
+        api_key=settings.openai_tts_api_key,
+        model=settings.openai_tts_model,
+        voice=settings.openai_tts_voice,
+        instructions=settings.openai_tts_instructions,
+    )
 
     # application = FastAPI(
     #     title=settings.app_name,
@@ -145,12 +122,7 @@ def create_app(
 
     @application.get("/api/ready")
     async def readiness():
-        if application.state.settings.tts_provider == "openai":
-            ready = _app_ready
-        else:
-            from .utils.neurtts_factory import NeurTTSFactory
-            ready = _app_ready and NeurTTSFactory._model is not None
-        return {"ready": ready}
+        return {"ready": _app_ready}
 
     application.include_router(build_gateway_router())
     application.include_router(build_streaming_router(provider, memory, personal, audit))

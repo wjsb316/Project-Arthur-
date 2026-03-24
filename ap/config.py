@@ -42,14 +42,7 @@ class Settings(BaseSettings):
     # Set ARTHUR_SKIP_SPEECH_SYNTHESIS=false to restore audio streaming.
     skip_speech_synthesis: bool = False
 
-    # Qwen3-TTS settings
-    # 0.6B is ~3x faster than 1.7B; use 1.7B if you need instruction control.
-    tts_model: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
-    tts_speaker: str = "Ryan"       # See Qwen3-TTS docs for available speakers
-    tts_language: str = "English"   # Default synthesis language
-
-    # TTS provider selection and OpenAI TTS settings
-    tts_provider: str = "qwen"                  # "qwen" or "openai"
+    # OpenAI TTS settings
     openai_tts_api_key: str | None = None
     openai_tts_model: str = "gpt-4o-mini-tts"
     openai_tts_voice: str = "coral"

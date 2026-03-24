@@ -30,8 +30,7 @@ def _clean_text(text: str) -> str:
 class OpenAITTSFactory:
     """TTS factory backed by the OpenAI audio/speech API.
 
-    Compatible with the TTSProvider protocol — can be used anywhere
-    NeurTTSFactory is accepted.
+    Implements the TTSProvider protocol.
     """
 
     def __init__(
@@ -54,7 +53,7 @@ class OpenAITTSFactory:
 
     @property
     def sample_rate(self) -> int:
-        """OpenAI PCM output is 24 kHz 16-bit signed LE — same as Qwen."""
+        """OpenAI PCM output is 24 kHz 16-bit signed LE."""
         return 24_000
 
     async def generate_audio_wav(self, text: str) -> bytes:
