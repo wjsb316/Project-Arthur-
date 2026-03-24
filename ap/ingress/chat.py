@@ -15,7 +15,6 @@ from ..models.chat import ChatSession, ChatMessage
 from ..models.users import User
 from .auth import get_current_user
 from ..utils.whisper_factory import whisper_factory
-from ..utils.neurtts_factory import neurtts_factory
 from ..utils.timer import PipelineTimer
 
 from ..models import ModelProvider
@@ -42,6 +41,7 @@ def build_chat_router(
     audit_log: AuditLog,
     voice_system_prompt: Optional[str] = None,
     skip_speech_synthesis: bool = True,
+    tts_provider=None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/chat", tags=["chat"])
     manager = StreamManager(provider)
@@ -244,12 +244,14 @@ def build_chat_router(
                 timer = result.pop("_timer", None)
 
                 # 4. Synthesize speech response
+                if tts_provider is None:
+                    raise HTTPException(status_code=503, detail="TTS provider not available")
                 response_text = result["response"]["content"]
                 if response_text:
                     await _increment_voice_characters(user.user_id, len(response_text))
                 audio_base64 = None
                 if response_text:
-                    wav_bytes = await neurtts_factory.generate_audio_wav(response_text)
+                    wav_bytes = await tts_provider.generate_audio_wav(response_text)
                     if timer:
                         timer.stamp("t3")  # WAV synthesis: first token = stream done
                         timer.stamp("t4")
@@ -332,13 +334,15 @@ def build_chat_router(
                         headers={"X-Session-ID": str(result["session_id"])},
                     )
 
+                if tts_provider is None:
+                    raise HTTPException(status_code=503, detail="TTS provider not available")
 
                 await _increment_voice_characters(user.user_id, len(response_text))
 
                 # TTS enabled: stream audio chunks as they're generated
                 async def audio_generator():
                     first_chunk = True
-                    async for chunk in neurtts_factory.generate_audio_stream(response_text):
+                    async for chunk in tts_provider.generate_audio_stream(response_text):
                         if first_chunk:
                             if timer:
                                 timer.stamp("t3")  # first TTS audio token
@@ -358,7 +362,7 @@ def build_chat_router(
                         "X-Transcribed-Text": transcribed_text,
                         "X-Model-Generation-Complete": "true",
                         "X-Audio-Format": "pcm16-length-prefixed",
-                        "X-Audio-Sample-Rate": str(neurtts_factory.sample_rate),
+                        "X-Audio-Sample-Rate": str(tts_provider.sample_rate),
                         "X-Audio-Channels": "1",
                         "X-Timing-T1": str(round(timing.get("t1_s") or 0, 3)),
                         "X-Timing-T2": str(round(timing.get("t2_s") or 0, 3)),
