@@ -19,6 +19,7 @@ interface AgentsViewProps {
   onCreateAgent: (e: React.FormEvent) => void;
   onUpdateAgent: (e: React.FormEvent) => void;
   onDeleteAgent: (id: number) => void;
+  onToggleAgent: (id: number, enabled: boolean) => void;
 }
 
 export default function AgentsView({
@@ -38,6 +39,7 @@ export default function AgentsView({
   onCreateAgent,
   onUpdateAgent,
   onDeleteAgent,
+  onToggleAgent,
 }: AgentsViewProps) {
   return (
     <div
@@ -155,6 +157,8 @@ export default function AgentsView({
               borderRadius: '8px',
               border: '1px solid #e2e8f0',
               position: 'relative',
+              opacity: agent.enabled === false ? 0.5 : 1,
+              transition: 'opacity 0.2s',
             }}
           >
             <button
@@ -194,6 +198,42 @@ export default function AgentsView({
             >
               <Pencil size={16} />
             </button>
+            <label
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', cursor: 'pointer' }}
+              title={agent.enabled === false ? 'Enable agent' : 'Disable agent'}
+            >
+              <span
+                onClick={() => onToggleAgent(agent.id, !(agent.enabled !== false))}
+                role="switch"
+                aria-checked={agent.enabled !== false}
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && onToggleAgent(agent.id, !(agent.enabled !== false))}
+                style={{
+                  display: 'inline-block',
+                  width: '36px',
+                  height: '20px',
+                  borderRadius: '10px',
+                  background: agent.enabled === false ? '#cbd5e1' : '#6366f1',
+                  position: 'relative',
+                  transition: 'background 0.2s',
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    left: agent.enabled === false ? '2px' : '18px',
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '50%',
+                    background: 'white',
+                    transition: 'left 0.2s',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  }}
+                />
+              </span>
+            </label>
             <h3 style={{ margin: '0 0 0.5rem 0' }}>{agent.name}</h3>
             <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
               Created: {new Date(agent.created_at || Date.now()).toLocaleDateString()}

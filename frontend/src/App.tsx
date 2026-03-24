@@ -319,6 +319,19 @@ function App() {
     }
   };
 
+  const handleToggleAgent = async (id: number, enabled: boolean) => {
+    try {
+      const res = await fetch(`/api/agents/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...API_HEADERS },
+        body: JSON.stringify({ enabled }),
+      });
+      if (res.ok) fetchAgents();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const fetchGuardrails = () => {
     fetch('/api/guardrails/', { headers: { Authorization: `Bearer ${token}`, ...API_HEADERS } })
       .then((res) => res.json())
@@ -702,6 +715,7 @@ function App() {
             onCreateAgent={handleCreateAgent}
             onUpdateAgent={handleUpdateAgent}
             onDeleteAgent={handleDeleteAgent}
+            onToggleAgent={handleToggleAgent}
           />
         )}
         {view === 'guardrails' && (

@@ -9,6 +9,7 @@ export interface Agent {
   id: number;
   name: string;
   prompt: string;
+  enabled: boolean;
   created_at?: string;
 }
 
