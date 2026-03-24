@@ -21,10 +21,6 @@ python-multipart
 # modernbert-embed-base for embeddings generation
 sentence-transformers==5.2.0
 
-# Qwen3-TTS (replaces NeuTTS-Air + llama-cpp-python)
-# qwen-tts
-git+https://github.com/dffdeeq/Qwen3-TTS-streaming.git
-soundfile==0.13.1
 numpy==2.2.6
 
 # OpenAI SDK — used by OpenAITTSFactory and langchain-openai
