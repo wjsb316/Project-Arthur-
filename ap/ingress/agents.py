@@ -14,16 +14,19 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 class AgentCreate(BaseModel):
     name: str
     prompt: str
+    enabled: bool = True
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     prompt: Optional[str] = None
+    enabled: Optional[bool] = None
 
 class AgentResponse(BaseModel):
     id: int
     user_id: str
     name: str
     prompt: str
+    enabled: bool
     created_at: str
 
     class Config:
@@ -36,6 +39,7 @@ class AgentResponse(BaseModel):
             user_id=obj.user_id,
             name=obj.name,
             prompt=obj.prompt,
+            enabled=obj.enabled,
             created_at=obj.created_at.isoformat()
         )
 
@@ -60,7 +64,8 @@ async def create_agent(
     new_agent = Agent(
         user_id=user.user_id,
         name=agent_in.name,
-        prompt=agent_in.prompt
+        prompt=agent_in.prompt,
+        enabled=agent_in.enabled
     )
     db.add(new_agent)
     await db.commit()
@@ -88,6 +93,8 @@ async def update_agent(
         agent.name = agent_update.name
     if agent_update.prompt is not None:
         agent.prompt = agent_update.prompt
+    if agent_update.enabled is not None:
+        agent.enabled = agent_update.enabled
         
     await db.commit()
     await db.refresh(agent)
