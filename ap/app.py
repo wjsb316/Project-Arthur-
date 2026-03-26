@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 
-from .config import Settings, load_settings
+from .config import Settings, is_openai_com_base_url, load_settings
 from .database import get_session_maker, init_db
 from .ingress.gateway import build_gateway_router
 from .ingress.streaming import build_streaming_router
@@ -78,10 +78,18 @@ def create_app(
 
     from .utils.openai_tts_factory import OpenAITTSFactory
 
-    if not settings.openai_tts_api_key:
-        raise ValueError("ARTHUR_OPENAI_TTS_API_KEY is required")
+    # Dedicated TTS key, or reuse the chat key when using OpenAI's API for both.
+    tts_api_key = settings.openai_tts_api_key
+    if not tts_api_key and settings.openai_api_key and is_openai_com_base_url(settings.openai_base_url):
+        tts_api_key = settings.openai_api_key
+    if not tts_api_key:
+        raise ValueError(
+            "TTS API key required: set ARTHUR_OPENAI_TTS_API_KEY, or use OpenAI for chat "
+            "(ARTHUR_OPENAI_BASE_URL=https://api.openai.com/v1) and set ARTHUR_OPENAI_API_KEY "
+            "so the same key can be used for speech."
+        )
     tts_provider = OpenAITTSFactory(
-        api_key=settings.openai_tts_api_key,
+        api_key=tts_api_key,
         model=settings.openai_tts_model,
         voice=settings.openai_tts_voice,
         instructions=settings.openai_tts_instructions,

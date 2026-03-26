@@ -4,6 +4,9 @@ import pytest
 
 from ap.models import OpenAIModelProvider
 
+# Default provider base_url is xAI; these tests mock OpenAI chat/completions SSE.
+_OPENAI_BASE = "https://api.openai.com/v1"
+
 
 class _MockStream(httpx.AsyncByteStream):
     def __init__(self, lines: list[str]) -> None:
@@ -29,7 +32,11 @@ async def test_openai_provider_streams_tokens_and_cleans_up():
         "data: [DONE]",
     ]
     client = httpx.AsyncClient(transport=_mock_transport(lines))
-    provider = OpenAIModelProvider(api_key="test-key", client=client)
+    provider = OpenAIModelProvider(
+        api_key="test-key",
+        base_url=_OPENAI_BASE,
+        client=client,
+    )
 
     cancel_event = asyncio.Event()
     tokens = []
@@ -47,7 +54,11 @@ async def test_openai_provider_cancel_stops_stream():
         "data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}",
     ]
     client = httpx.AsyncClient(transport=_mock_transport(lines))
-    provider = OpenAIModelProvider(api_key="test-key", client=client)
+    provider = OpenAIModelProvider(
+        api_key="test-key",
+        base_url=_OPENAI_BASE,
+        client=client,
+    )
 
     cancel_event = asyncio.Event()
     stream = provider.stream("stream-2", "hello", cancel_event)
