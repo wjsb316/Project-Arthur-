@@ -19,10 +19,11 @@ interface HistoryViewProps {
 
 const cardStyle = {
   flex: 1,
-  border: '1px solid #e2e8f0',
+  border: '1px solid var(--form-border-subtle)',
   borderRadius: '8px',
   padding: '1rem',
-  background: 'white',
+  background: 'var(--form-card-bg)',
+  color: 'var(--text-color)',
 };
 
 export default function HistoryView({
@@ -58,8 +59,8 @@ export default function HistoryView({
           onClick={onDeleteSelected}
           disabled={selectedSessions.length === 0}
           style={{
-            backgroundColor: selectedSessions.length > 0 ? '#ef4444' : '#e2e8f0',
-            color: selectedSessions.length > 0 ? 'white' : '#94a3b8',
+            backgroundColor: selectedSessions.length > 0 ? '#ef4444' : 'var(--send-btn-bg)',
+            color: selectedSessions.length > 0 ? 'white' : 'var(--muted-foreground-2)',
             border: 'none',
             padding: '0.5rem 1rem',
             borderRadius: '4px',
@@ -76,7 +77,14 @@ export default function HistoryView({
           value={historySearch}
           onChange={(e) => setHistorySearch(e.target.value)}
           placeholder="Search history..."
-          style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+          style={{
+            width: '100%',
+            padding: '0.5rem',
+            borderRadius: '4px',
+            border: '1px solid var(--form-input-border)',
+            background: 'var(--form-input-bg)',
+            color: 'var(--text-color)',
+          }}
         />
       </div>
       <div className="history-list" style={{ flex: 1, overflowY: 'auto' }}>
@@ -94,7 +102,7 @@ export default function HistoryView({
             <div style={cardStyle}>
               <div
                 style={{
-                  borderBottom: '1px solid #eee',
+                  borderBottom: '1px solid var(--border-color)',
                   paddingBottom: '0.5rem',
                   marginBottom: '1rem',
                   display: 'flex',
@@ -102,7 +110,7 @@ export default function HistoryView({
                   alignItems: 'center',
                 }}
               >
-                <span style={{ color: '#64748b', fontSize: '0.9rem' }}>
+                <span style={{ color: 'var(--muted-foreground)', fontSize: '0.9rem' }}>
                   Session {session.id} • {session.created_at}
                 </span>
                 <button
@@ -126,7 +134,7 @@ export default function HistoryView({
                   key={i}
                   style={{ marginBottom: '0.5rem', fontFamily: 'monospace', fontSize: '0.9rem' }}
                 >
-                  <div style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{msg.created_at}</div>
+                  <div style={{ color: 'var(--muted-foreground-2)', fontSize: '0.8rem' }}>{msg.created_at}</div>
                   <div>
                     <strong>{msg.role}:</strong>{' '}
                     <ReactMarkdown components={{ p: ({ children }) => <span>{children}</span> }}>
@@ -163,7 +171,7 @@ export default function HistoryView({
         >
           {nukeProgress > 0 ? `HOLD TO NUKE... ${nukeProgress}%` : 'NUKE HISTORY'}
         </button>
-        <p style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+        <p style={{ color: 'var(--muted-foreground)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
           Press and hold to delete all history
         </p>
       </div>

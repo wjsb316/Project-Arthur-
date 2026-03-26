@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTheme, type ThemePreference } from '../theme';
 
 interface SettingsViewProps {
   similarityThreshold: number;
@@ -9,6 +10,12 @@ interface SettingsViewProps {
   onDeleteAccount: () => void;
 }
 
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'system', label: 'System' },
+];
+
 export default function SettingsView({
   similarityThreshold,
   setSimilarityThreshold,
@@ -17,6 +24,8 @@ export default function SettingsView({
   voiceCharactersUsed,
   onDeleteAccount,
 }: SettingsViewProps) {
+  const { preference, setPreference } = useTheme();
+
   const handleThresholdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseInt(e.target.value, 10);
     setSimilarityThreshold(v);
@@ -32,9 +41,29 @@ export default function SettingsView({
   };
 
   return (
-    <div className="content-placeholder">
+    <div className="content-placeholder settings-content">
       <h2>Settings</h2>
-      <div className="settings-section">
+      <div className="settings-section" style={{ width: '100%', maxWidth: '420px' }}>
+        <h3>Appearance</h3>
+        <p className="form-hint" style={{ marginBottom: '0.75rem' }}>
+          Theme applies across the app. System follows your OS light/dark setting.
+        </p>
+        <div className="theme-options" role="radiogroup" aria-label="Color theme">
+          {THEME_OPTIONS.map(({ value, label }) => (
+            <label key={value} className="theme-option">
+              <input
+                type="radio"
+                name="theme"
+                value={value}
+                checked={preference === value}
+                onChange={() => setPreference(value)}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="settings-section" style={{ width: '100%', maxWidth: '420px' }}>
         <h3>Vector Search</h3>
         <div className="form-group">
           <label htmlFor="similarity-slider">
@@ -54,7 +83,7 @@ export default function SettingsView({
             Minimum similarity for vector searches (memories, chat history). Guardrails are always included. Higher = stricter.
           </p>
         </div>
-        <p>
+        <p style={{ color: 'var(--text-color)' }}>
           Total characters sent to voice model:{' '}
           <strong>{voiceCharactersUsed.toLocaleString()}</strong>
         </p>

@@ -31,23 +31,25 @@ interface MemoriesViewProps {
   onNukeTouchEnd: () => void;
 }
 
-const selectStyles = {
+const selectStyles: React.CSSProperties = {
   width: '100%',
   padding: '0.5rem',
   borderRadius: '4px',
-  border: '1px solid #cbd5e1',
-  background: 'white',
-  color: '#1e293b',
+  border: '1px solid var(--form-input-border)',
+  background: 'var(--form-input-bg)',
+  color: 'var(--text-color)',
   marginBottom: '1rem',
 };
 
-const textareaStyles = {
+const textareaStyles: React.CSSProperties = {
   width: '100%',
   padding: '0.5rem',
   borderRadius: '4px',
-  border: '1px solid #cbd5e1',
+  border: '1px solid var(--form-input-border)',
   minHeight: '100px',
   fontFamily: 'inherit',
+  background: 'var(--form-input-bg)',
+  color: 'var(--text-color)',
 };
 
 export default function MemoriesView({
@@ -97,8 +99,8 @@ export default function MemoriesView({
             onClick={onDeleteSelected}
             disabled={selectedMemories.length === 0}
             style={{
-              backgroundColor: selectedMemories.length > 0 ? '#ef4444' : '#e2e8f0',
-              color: selectedMemories.length > 0 ? 'white' : '#94a3b8',
+              backgroundColor: selectedMemories.length > 0 ? '#ef4444' : 'var(--send-btn-bg)',
+              color: selectedMemories.length > 0 ? 'white' : 'var(--muted-foreground-2)',
               border: 'none',
               padding: '0.5rem 1rem',
               borderRadius: '4px',
@@ -123,23 +125,30 @@ export default function MemoriesView({
           value={memorySearch}
           onChange={(e) => setMemorySearch(e.target.value)}
           placeholder="Search memories..."
-          style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+          style={{
+            width: '100%',
+            padding: '0.5rem',
+            borderRadius: '4px',
+            border: '1px solid var(--form-input-border)',
+            background: 'var(--form-input-bg)',
+            color: 'var(--text-color)',
+          }}
         />
       </div>
       {isCreatingMemory && (
         <div
           style={{
-            background: 'white',
+            background: 'var(--form-card-bg)',
             padding: '1.5rem',
             borderRadius: '8px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid var(--form-border-subtle)',
             marginBottom: '2rem',
           }}
         >
           <h3>New Memory</h3>
           <form onSubmit={onCreateMemory}>
             <div className="form-group">
-              <label style={{ color: '#1e293b' }}>Type</label>
+              <label style={{ color: 'var(--form-label)' }}>Type</label>
               <select
                 value={newMemoryKind}
                 onChange={(e) => setNewMemoryKind(e.target.value)}
@@ -151,7 +160,7 @@ export default function MemoriesView({
               </select>
             </div>
             <div className="form-group">
-              <label style={{ color: '#1e293b' }}>Content</label>
+              <label style={{ color: 'var(--form-label)' }}>Content</label>
               <textarea
                 value={newMemoryContent}
                 onChange={(e) => setNewMemoryContent(e.target.value)}
@@ -169,17 +178,17 @@ export default function MemoriesView({
       {editingMemory && (
         <div
           style={{
-            background: 'white',
+            background: 'var(--form-card-bg)',
             padding: '1.5rem',
             borderRadius: '8px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid var(--form-border-subtle)',
             marginBottom: '2rem',
           }}
         >
           <h3>Edit Memory</h3>
           <form onSubmit={onUpdateMemory}>
             <div className="form-group">
-              <label style={{ color: '#1e293b' }}>Type</label>
+              <label style={{ color: 'var(--form-label)' }}>Type</label>
               <select value={editMemoryKind} onChange={(e) => setEditMemoryKind(e.target.value)} style={selectStyles}>
                 <option value="fact">Fact</option>
                 <option value="episode">Episode</option>
@@ -187,7 +196,7 @@ export default function MemoriesView({
               </select>
             </div>
             <div className="form-group">
-              <label style={{ color: '#1e293b' }}>Content</label>
+              <label style={{ color: 'var(--form-label)' }}>Content</label>
               <textarea
                 value={editMemoryContent}
                 onChange={(e) => setEditMemoryContent(e.target.value)}
@@ -216,10 +225,10 @@ export default function MemoriesView({
             <div
               style={{
                 flex: 1,
-                background: 'white',
+                background: 'var(--form-card-bg)',
                 padding: '1.5rem',
                 borderRadius: '8px',
-                border: '1px solid #e2e8f0',
+                border: '1px solid var(--form-border-subtle)',
                 position: 'relative',
               }}
             >
@@ -236,19 +245,19 @@ export default function MemoriesView({
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
-                  color: '#94a3b8',
+                  color: 'var(--muted-foreground-2)',
                 }}
                 title="Edit Memory"
               >
                 <Pencil size={16} />
               </button>
-              <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--muted-foreground-2)', marginBottom: '0.5rem' }}>
                 {new Date(memory.created_at).toLocaleDateString()} • {memory.kind}
               </div>
               <div
                 style={{
                   fontSize: '0.9rem',
-                  color: '#64748b',
+                  color: 'var(--muted-foreground)',
                   whiteSpace: 'pre-wrap',
                   maxHeight: '150px',
                   overflowY: 'auto',
@@ -260,7 +269,7 @@ export default function MemoriesView({
           </div>
         ))}
         {filteredMemories.length === 0 && !isCreatingMemory && (
-          <div style={{ textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>No memories found.</div>
+          <div style={{ textAlign: 'center', color: 'var(--muted-foreground-2)', padding: '2rem' }}>No memories found.</div>
         )}
       </div>
       <div style={{ marginTop: '2rem', textAlign: 'center' }}>
@@ -287,7 +296,7 @@ export default function MemoriesView({
         >
           {nukeProgress > 0 ? `HOLD TO NUKE... ${nukeProgress}%` : 'NUKE MEMORIES'}
         </button>
-        <p style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+        <p style={{ color: 'var(--muted-foreground)', fontSize: '0.8rem', marginTop: '0.5rem' }}>
           Press and hold to delete all memories
         </p>
       </div>

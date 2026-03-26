@@ -1,6 +1,20 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      (function () {
+        try {
+          var k = 'arthur-theme-preference';
+          var v = localStorage.getItem(k);
+          var d = 'light';
+          if (v === 'dark') d = 'dark';
+          else if (v === 'system' || !v)
+            d = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', d);
+          document.documentElement.style.colorScheme = d === 'dark' ? 'dark' : 'light';
+        } catch (e) {}
+      })();
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

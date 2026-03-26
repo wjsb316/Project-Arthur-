@@ -1,5 +1,6 @@
 import React from 'react';
 import { Send } from 'lucide-react';
+import { useResolvedThemeIsDark } from '../theme';
 import ReactMarkdown from 'react-markdown';
 import { IconCat, IconNewChat } from '../components/Icons';
 import TypingIndicator from '../components/TypingIndicator';
@@ -27,6 +28,7 @@ export default function ChatView({
   onSubmit,
   pipelineTiming,
 }: ChatViewProps) {
+  const isDark = useResolvedThemeIsDark();
   return (
     <div className="chat-interface">
       <header className="chat-header">
@@ -39,11 +41,11 @@ export default function ChatView({
             title="Start New Chat"
             style={{
               background: 'transparent',
-              border: '1px solid #e2e8f0',
+              border: '1px solid var(--border-color)',
               borderRadius: '8px',
               padding: '0.5rem',
               cursor: 'pointer',
-              color: '#64748b',
+              color: 'var(--muted-foreground)',
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
@@ -52,7 +54,7 @@ export default function ChatView({
             <IconNewChat />
             <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>New Chat</span>
           </button>
-          <PipelineTimingDisplay timing={pipelineTiming ?? null} dark={false} />
+          <PipelineTimingDisplay timing={pipelineTiming ?? null} dark={isDark} />
         </div>
       </header>
       <div className="chat-area">
@@ -105,7 +107,7 @@ export default function ChatView({
             rows={1}
           />
           <button type="submit" className="send-btn" disabled={isLoading || !chatInput.trim()}>
-            <Send color="#000000" strokeWidth={1} />
+            <Send color="currentColor" strokeWidth={1} />
           </button>
         </form>
       </div>

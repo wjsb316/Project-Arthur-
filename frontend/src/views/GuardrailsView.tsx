@@ -57,27 +57,31 @@ export default function GuardrailsView({
       {isCreatingGuardrail && (
         <div
           style={{
-            background: 'white',
+            background: 'var(--form-card-bg)',
             padding: '1.5rem',
             borderRadius: '8px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid var(--form-border-subtle)',
             marginBottom: '2rem',
           }}
         >
           <h3>New Guardrail</h3>
           <form onSubmit={onCreateGuardrail}>
             <div className="form-group">
-              <label style={{ color: '#1e293b' }}>Name</label>
+              <label style={{ color: 'var(--form-label)' }}>Name</label>
               <input
                 value={newGuardrailName}
                 onChange={(e) => setNewGuardrailName(e.target.value)}
                 placeholder="e.g. Safety Filter"
-                style={{ background: 'white', color: '#1e293b', border: '1px solid #cbd5e1' }}
+                style={{
+                  background: 'var(--form-input-bg)',
+                  color: 'var(--text-color)',
+                  border: '1px solid var(--form-input-border)',
+                }}
                 required
               />
             </div>
             <div className="form-group">
-              <label style={{ color: '#1e293b' }}>Rule/Prompt</label>
+              <label style={{ color: 'var(--form-label)' }}>Rule/Prompt</label>
               <textarea
                 value={newGuardrailPrompt}
                 onChange={(e) => setNewGuardrailPrompt(e.target.value)}
@@ -86,7 +90,9 @@ export default function GuardrailsView({
                   width: '100%',
                   padding: '0.5rem',
                   borderRadius: '4px',
-                  border: '1px solid #cbd5e1',
+                  border: '1px solid var(--form-input-border)',
+                  background: 'var(--form-input-bg)',
+                  color: 'var(--text-color)',
                   minHeight: '100px',
                   fontFamily: 'inherit',
                 }}
@@ -102,26 +108,30 @@ export default function GuardrailsView({
       {editingGuardrail && (
         <div
           style={{
-            background: 'white',
+            background: 'var(--form-card-bg)',
             padding: '1.5rem',
             borderRadius: '8px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid var(--form-border-subtle)',
             marginBottom: '2rem',
           }}
         >
           <h3>Edit Guardrail</h3>
           <form onSubmit={onUpdateGuardrail}>
             <div className="form-group">
-              <label style={{ color: '#1e293b' }}>Name</label>
+              <label style={{ color: 'var(--form-label)' }}>Name</label>
               <input
                 value={editGuardrailName}
                 onChange={(e) => setEditGuardrailName(e.target.value)}
-                style={{ background: 'white', color: '#1e293b', border: '1px solid #cbd5e1' }}
+                style={{
+                  background: 'var(--form-input-bg)',
+                  color: 'var(--text-color)',
+                  border: '1px solid var(--form-input-border)',
+                }}
                 required
               />
             </div>
             <div className="form-group">
-              <label style={{ color: '#1e293b' }}>Rule/Prompt</label>
+              <label style={{ color: 'var(--form-label)' }}>Rule/Prompt</label>
               <textarea
                 value={editGuardrailPrompt}
                 onChange={(e) => setEditGuardrailPrompt(e.target.value)}
@@ -129,7 +139,9 @@ export default function GuardrailsView({
                   width: '100%',
                   padding: '0.5rem',
                   borderRadius: '4px',
-                  border: '1px solid #cbd5e1',
+                  border: '1px solid var(--form-input-border)',
+                  background: 'var(--form-input-bg)',
+                  color: 'var(--text-color)',
                   minHeight: '100px',
                   fontFamily: 'inherit',
                 }}
@@ -150,10 +162,10 @@ export default function GuardrailsView({
           <div
             key={guardrail.id}
             style={{
-              background: 'white',
+              background: 'var(--form-card-bg)',
               padding: '1.5rem',
               borderRadius: '8px',
-              border: '1px solid #e2e8f0',
+              border: '1px solid var(--form-border-subtle)',
               position: 'relative',
             }}
           >
@@ -166,7 +178,7 @@ export default function GuardrailsView({
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                color: '#94a3b8',
+                color: 'var(--muted-foreground-2)',
               }}
               title="Delete Guardrail"
             >
@@ -188,20 +200,20 @@ export default function GuardrailsView({
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                color: '#94a3b8',
+                color: 'var(--muted-foreground-2)',
               }}
               title="Edit Guardrail"
             >
               <Pencil size={16} />
             </button>
             <h3 style={{ margin: '0 0 0.5rem 0' }}>{guardrail.name}</h3>
-            <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--muted-foreground-2)', marginBottom: '0.5rem' }}>
               Created: {new Date(guardrail.created_at || Date.now()).toLocaleDateString()}
             </div>
             <div
               style={{
                 fontSize: '0.9rem',
-                color: '#64748b',
+                color: 'var(--muted-foreground)',
                 whiteSpace: 'pre-wrap',
                 maxHeight: '150px',
                 overflowY: 'auto',
@@ -212,7 +224,7 @@ export default function GuardrailsView({
           </div>
         ))}
         {guardrails.length === 0 && !isCreatingGuardrail && (
-          <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>
+          <div style={{ gridColumn: '1/-1', textAlign: 'center', color: 'var(--muted-foreground-2)', padding: '2rem' }}>
             No guardrails found. Create one to get started.
           </div>
         )}
