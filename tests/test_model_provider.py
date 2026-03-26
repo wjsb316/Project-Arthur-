@@ -4,7 +4,7 @@ import pytest
 
 from ap.models import OpenAIModelProvider
 
-# Default provider base_url is xAI; these tests mock OpenAI chat/completions SSE.
+# Official OpenAI host uses Responses API + web_search (same SSE shape as xAI).
 _OPENAI_BASE = "https://api.openai.com/v1"
 
 
@@ -27,8 +27,8 @@ def _mock_transport(lines: list[str]) -> httpx.MockTransport:
 @pytest.mark.asyncio
 async def test_openai_provider_streams_tokens_and_cleans_up():
     lines = [
-        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}",
-        "data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}",
+        'data: {"type":"response.output_text.delta","delta":"Hello "}',
+        'data: {"type":"response.output_text.delta","delta":"world"}',
         "data: [DONE]",
     ]
     client = httpx.AsyncClient(transport=_mock_transport(lines))
@@ -50,8 +50,8 @@ async def test_openai_provider_streams_tokens_and_cleans_up():
 @pytest.mark.asyncio
 async def test_openai_provider_cancel_stops_stream():
     lines = [
-        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}",
-        "data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}",
+        'data: {"type":"response.output_text.delta","delta":"Hello "}',
+        'data: {"type":"response.output_text.delta","delta":"world"}',
     ]
     client = httpx.AsyncClient(transport=_mock_transport(lines))
     provider = OpenAIModelProvider(

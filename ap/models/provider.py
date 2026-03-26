@@ -11,6 +11,8 @@ from typing import Any, AsyncGenerator, Protocol
 
 import httpx
 
+from ap.config import is_openai_com_base_url
+
 
 logger = logging.getLogger("arthur.ap.model_provider")
 
@@ -115,13 +117,14 @@ class OpenAIModelProvider:
             text,
         )
         
-        is_xai = "x.ai" in self._base_url
-        if is_xai:
+        # xAI and OpenAI official API: Responses API + web_search (Chat Completions has no web search).
+        use_responses_api = "x.ai" in self._base_url or is_openai_com_base_url(self._base_url)
+        if use_responses_api:
             url = f"{self._base_url}/responses"
             payload = {
                 "model": self._model,
                 "stream": True,
-                "input": text,  # xAI responses endpoint uses "input" not "messages"
+                "input": text,  # Responses API uses string or structured "input"
                 "tools": [{"type": "web_search"}],
             }
         else:
@@ -189,9 +192,8 @@ class OpenAIModelProvider:
                                 extra={"event": "provider_parsed", "stream_id": stream_id, "keys": list(parsed.keys())},
                             )
                             
-                            # Handle xAI responses endpoint streaming format
-                            if is_xai:
-                                # xAI uses event-based streaming with "type" field
+                            # Responses API (xAI or OpenAI): event-based streaming with "type" field
+                            if use_responses_api:
                                 event_type = parsed.get("type", "")
                                 if event_type == "response.output_text.delta":
                                     delta = parsed.get("delta", "")
@@ -199,7 +201,7 @@ class OpenAIModelProvider:
                                         yield delta
                                 elif event_type in ("response.completed", "response.done"):
                                     break
-                                # Other event types (response.created, etc.) are ignored
+                                # Other event types (response.created, web_search_call, etc.) are ignored
                             else:
                                 # OpenAI chat completions format (and compatible proxies)
                                 if parsed.get("error"):
